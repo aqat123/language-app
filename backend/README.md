@@ -698,21 +698,6 @@ For detailed information about the project architecture, AI integration strategy
 
 ---
 
-## License
-
-[Add your license information here]
-
----
-
-## Contact & Support
-
-For questions or support:
-- Project Team: [Add team contact]
-- Documentation: See `technologies.md` for detailed project plan
-- Issues: [Add GitHub issues link or contact method]
-
----
-
 ## Quick Reference Commands
 
 ```bash
