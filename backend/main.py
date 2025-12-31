@@ -1,11 +1,8 @@
-from fastapi import FastAPI
+from app.main import app
 
-app = FastAPI()
+# This file exists for easy import and running
+# Run with: uvicorn main:app --reload
 
-@app.get("/api/greeting")
-def read_greeting():
-    return {"message": "Hello from the backend!"}
-
-@app.get("/api/add")
-def add(a: int, b: int):
-    return {"a": a, "b": b, "sum": a + b}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
