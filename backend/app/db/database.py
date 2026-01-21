@@ -4,10 +4,13 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
 # Create database engine
+# Use check_same_thread=False for SQLite (required for FastAPI async)
+connect_args = {"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {}
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
     echo=settings.DEBUG,
+    connect_args=connect_args
 )
 
 # Create session factory

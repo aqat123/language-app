@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # LLM API Configuration
     LLM_API_KEY: str
     LLM_API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
-    LLM_MODEL: str = "gemini-1.5-flash"
+    LLM_MODEL: str = "gemini-2.5-flash"
 
     # Speech-to-Text API Configuration
     STT_API_KEY: str
