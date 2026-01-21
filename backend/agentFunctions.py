@@ -1,41 +1,45 @@
-# libraries to enable agent
-
-# tell we are usign the other class
 import logging
-import AIOrchestrator
+# Import the orchestrator instance
+from AIOrchestrator import ai_orchestrator
 
-# we use a logger for debugging and info
 logger = logging.getLogger(__name__)
 
-# contains the app backend logic (manages it)
-async def get_reply(language: str, user_msg: str, context: list):
-    """
-        Business logic to handle conversation flow.
 
-        Args:
-            :param language: The target language (e.g., "German", "Spanish")
-            :param context: List of previous message strings (history).
-            :param user_msg: The latest user message string.
-        """
-
-    # instructs the AI on how to behave specifically for these type of requests (role prompt)
+async def get_chat_reply(language: str, user_msg: str, context: list) -> str:
+    """Standard Chat Logic"""
     system_instruction = (
-        f"You are a friendly and patient {language} language tutor. "
-        f"Your goal is to help the user practice {language} conversation. "
-        "Keep your responses concise (1-3 sentences) to keep the conversation flowing. "
-        "If the user makes a grammar mistake, gently correct them at the end of your response "
-        "inside parentheses like this: (Correction: ...). "
-        "Do not switch to English unless the user is completely stuck."
+        f"You are a friendly {language} tutor. "
+        "Keep responses concise. Correct grammar mistakes gently at the end."
     )
 
-    # log request
-    logger.info(f"Conversation Request - Lang: {language}, User: {user_msg}")
-
-    # call the AI Orchestrator
-    reply = await AIOrchestrator.ai_orchestrator.generate_conversation_reply(
-        system_prompt=system_instruction,
-        user_message=user_msg,
-        history=context
-    )
-
+    # Call Orchestrator (Generation + Safety Check)
+    reply = await ai_orchestrator.generate_reply(system_prompt=system_instruction, user_message=user_msg,
+                                                 history=context)
     return reply
+
+
+async def get_vocab_word(language: str) -> str:
+    """Generates a single vocabulary word"""
+    system_instruction = (
+        f"Provide a single {language} vocabulary word suitable for a beginner. "
+        "It must be a concrete noun that is easy to visualize (e.g., Apple, Dog, Car). "
+        "Output ONLY the word, no punctuation."
+    )
+
+    # We pass an empty history since vocab generation is stateless
+    word = await ai_orchestrator.generate_reply(system_prompt=system_instruction, user_message="Generate Word",
+                                                history=[])
+    return word.strip()
+
+
+async def check_vocab_guess(language: str, target_word: str, user_guess: str) -> dict:
+    """
+    USES THE CROSS-CHECKER AI to validate the guess.
+    """
+    # We ask the Orchestrator specifically to judge correctness
+    verdict = await ai_orchestrator.validate_vocabulary_match(
+        language=language,
+        target=target_word,
+        guess=user_guess
+    )
+    return verdict

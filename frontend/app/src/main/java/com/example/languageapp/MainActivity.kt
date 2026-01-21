@@ -3,7 +3,6 @@ package com.example.languageapp
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,7 +40,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// --- NETWORK CLIENT ---
+// NETWORK CLIENT
 object RetrofitClient {
     // 10.0.2.2 is the Android Emulator's alias for "localhost"
     private const val BASE_URL = "http://10.0.2.2:8000"
@@ -55,7 +54,7 @@ object RetrofitClient {
     }
 }
 
-// --- NAVIGATION HOST ---
+// NAVIGATION HOST
 @Composable
 fun AppNavigation() {
     val navController = rememberNavController()
@@ -68,7 +67,7 @@ fun AppNavigation() {
     }
 }
 
-// --- 1. DASHBOARD SCREEN ---
+// DASHBOARD
 @Composable
 fun DashboardScreen(navController: NavController) {
     Column(
@@ -98,7 +97,7 @@ fun MenuButton(text: String, onClick: () -> Unit) {
     }
 }
 
-// --- 2. QUIZ SCREEN (PRONUNCIATION) ---
+// QUIZ SCREEN (PRONUNCIATION)
 @Composable
 fun QuizScreen(navController: NavController) {
     var feedback by remember { mutableStateOf("Press 'Record' and read the phrase.") }
@@ -162,11 +161,14 @@ fun QuizScreen(navController: NavController) {
     }
 }
 
-// --- 3. CHAT SCREEN ---
+// CHAT SCREEN
 @Composable
 fun ChatScreen(navController: NavController) {
     var messageText by remember { mutableStateOf("") }
-    var chatHistory by remember { mutableStateOf(listOf<Pair<String, Boolean>>()) } // Pair(Text, IsUser)
+    // UI History (Bubbles)
+    var chatHistory by remember { mutableStateOf(listOf<Pair<String, Boolean>>()) }
+    // Backend Context (List of Strings for Python)
+    var backendContext by remember { mutableStateOf(listOf<String>()) }
     var isSending by remember { mutableStateOf(false) }
 
     ScreenTemplate(title = "AI Chat Tutor", navController = navController) {
@@ -200,12 +202,16 @@ fun ChatScreen(navController: NavController) {
                     chatHistory = chatHistory + (userMsg to true)
                     isSending = true
 
-                    val req = ChatRequest(language = "Spanish", userMessage = userMsg)
+                    val req = ChatRequest(language = "Spanish", user_msg = userMsg, context = backendContext)
+
                     RetrofitClient.apiService.sendMessage(req).enqueue(object : Callback<ChatResponse> {
                         override fun onResponse(call: Call<ChatResponse>, response: Response<ChatResponse>) {
                             isSending = false
                             if (response.isSuccessful) {
-                                val reply = response.body()?.reply ?: "..."
+                                val body = response.body()
+                                val reply = body?.reply ?: "..."
+                                // UPDATE CONTEXT FROM SERVER
+                                backendContext = body?.context ?: emptyList()
                                 chatHistory = chatHistory + (reply to false)
                             } else {
                                 chatHistory = chatHistory + ("Error: ${response.code()}" to false)
@@ -244,33 +250,64 @@ fun ChatBubble(text: String, isUser: Boolean) {
     }
 }
 
-// --- 4. VOCAB SCREEN ---
 @Composable
 fun VocabScreen(navController: NavController) {
     var currentWord by remember { mutableStateOf("Loading...") }
-    var definition by remember { mutableStateOf("") }
-    var example by remember { mutableStateOf("") }
+    var userGuess by remember { mutableStateOf("") }
+    var feedback by remember { mutableStateOf("") }
+    var isCorrect by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
 
-    // Helper to fetch new card
+    // 1. Function to Get a New Word
     fun fetchCard() {
         isLoading = true
-        val req = VocabRequest(language = "French", level = "beginner", topic = "food")
+        feedback = "" // Reset feedback
+        userGuess = "" // Reset input
+        isCorrect = false
+
+        val req = VocabRequest(language = "German") // Fixed language for test
         RetrofitClient.apiService.generateVocab(req).enqueue(object : Callback<VocabResponse> {
             override fun onResponse(call: Call<VocabResponse>, response: Response<VocabResponse>) {
                 isLoading = false
-                if (response.isSuccessful) {
-                    val card = response.body()?.flashcard
-                    currentWord = card?.word ?: "Error"
-                    definition = card?.meaning ?: ""
-                    example = card?.example ?: ""
+                currentWord = if (response.isSuccessful) {
+                    // Python sends: { "vocabulary_word": "Apfel" }
+                    response.body()?.vocabulary_word ?: "Error"
                 } else {
-                    currentWord = "Error ${response.code()}"
+                    "Server Error ${response.code()}"
                 }
             }
             override fun onFailure(call: Call<VocabResponse>, t: Throwable) {
                 isLoading = false
-                currentWord = "Network Error"
+                currentWord = "Connection Failed"
+            }
+        })
+    }
+
+    // Function to Check the User's Guess
+    fun checkGuess() {
+        if (userGuess.isBlank()) return
+        isLoading = true
+
+        val req = VocabCheckRequest(
+            target_word = currentWord,
+            user_guess = userGuess,
+            language = "German"
+        )
+
+        RetrofitClient.apiService.checkVocab(req).enqueue(object : Callback<VocabCheckResponse> {
+            override fun onResponse(call: Call<VocabCheckResponse>, response: Response<VocabCheckResponse>) {
+                isLoading = false
+                if (response.isSuccessful) {
+                    val result = response.body()
+                    isCorrect = result?.is_correct ?: false
+                    feedback = result?.feedback ?: "No feedback"
+                } else {
+                    feedback = "Error checking: ${response.code()}"
+                }
+            }
+            override fun onFailure(call: Call<VocabCheckResponse>, t: Throwable) {
+                isLoading = false
+                feedback = "Network error"
             }
         })
     }
@@ -278,43 +315,67 @@ fun VocabScreen(navController: NavController) {
     // Load first card on startup
     LaunchedEffect(Unit) { fetchCard() }
 
-    ScreenTemplate(title = "Vocab Flashcards", navController = navController) {
+    ScreenTemplate(title = "Vocab Trainer", navController = navController) {
 
-        // The "Mutable ImageBox" (Placeholder for now)
-        Box(
-            modifier = Modifier
-                .size(200.dp)
-                .background(Color.LightGray, RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center
+        // The Target Word (In a real app, maybe show an Image here instead of text!)
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+            modifier = Modifier.fillMaxWidth().padding(16.dp)
         ) {
-            Text("Image for '$currentWord'", color = Color.Gray)
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Target Word:", style = MaterialTheme.typography.labelMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(currentWord, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
+            }
         }
 
         Spacer(Modifier.height(24.dp))
 
-        // The Word Info
-        Text(currentWord, style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
-        if (definition.isNotEmpty()) {
-            Text(definition, style = MaterialTheme.typography.titleLarge, color = Color.Gray)
+        // Input Field for Guess
+        OutlinedTextField(
+            value = userGuess,
+            onValueChange = { userGuess = it },
+            label = { Text("Your translation/guess") },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        // Check Button
+        Button(
+            onClick = { checkGuess() },
+            enabled = !isLoading && userGuess.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Check Answer")
+        }
+
+        // Feedback Display
+        if (feedback.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Text(example, Modifier.padding(16.dp), fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
-            }
+            Text(
+                text = feedback,
+                color = if (isCorrect) Color(0xFF006400) else Color.Red, // Green if correct
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                textAlign = TextAlign.Center
+            )
         }
 
         Spacer(Modifier.weight(1f))
 
-        Button(
+        // Next Word Button
+        OutlinedButton(
             onClick = { fetchCard() },
             enabled = !isLoading,
-            modifier = Modifier.fillMaxWidth().padding(16.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Text(if (isLoading) "Generating..." else "Next Word")
+            Text("Next Word")
         }
     }
 }
 
-// --- SHARED TEMPLATE (Header + Back Button) ---
+// SHARED TEMPLATE
 @Composable
 fun ScreenTemplate(title: String, navController: NavController, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier = Modifier.fillMaxSize()) {
