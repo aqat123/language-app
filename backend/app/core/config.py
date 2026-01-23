@@ -13,6 +13,11 @@ class Settings(BaseSettings):
     LLM_API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
     LLM_MODEL: str = "gemini-2.5-flash"
 
+    # Image Generation API Configuration
+    LLM_IMAGE_API_KEY: str
+    LLM_IMAGE_API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+    LLM_IMAGE_MODEL: str = "imagen-4.0-generate-001"
+
     # Speech-to-Text API Configuration
     STT_API_KEY: str
     STT_API_BASE_URL: str = "https://speech.googleapis.com/v1"

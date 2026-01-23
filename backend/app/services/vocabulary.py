@@ -3,6 +3,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from uuid import uuid4
 from app.db.models import User, ContentLog, UserProgress
+from app.services.image_client import get_image_client
 from app.services.ai_services import get_llm_client, get_checker_service
 from app.schemas.vocabulary import FlashcardResponse, VocabularyAnswerRequest, VocabularyAnswerResponse
 
@@ -27,6 +28,7 @@ async def get_next_flashcard(
     """
     llm = get_llm_client()
     checker = get_checker_service()
+    imm_client = get_image_client()
 
     # Find or create user
     user = db.query(User).filter(User.external_id == user_id).first()
@@ -109,6 +111,18 @@ async def get_next_flashcard(
             flashcard_data = json.loads(checker_result["suggested_fix"])
         except (json.JSONDecodeError, TypeError, KeyError):
             pass  # Keep original if parsing fails
+
+    word = flashcard_data.get("word", "")
+    definition = flashcard_data.get("definition", "")
+    imm_b64 = None
+
+    if word and definition:
+        # Generate image
+        image_prompt = f"{word}, meaning: {definition}"
+        imm_b64 = await imm_client.generate_safe_image(image_prompt)
+
+    # update the field to be seen in the frontend
+    flashcard_data["image_data"] = imm_b64
 
     # Log content
     content_log = ContentLog(

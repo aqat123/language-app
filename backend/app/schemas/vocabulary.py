@@ -9,6 +9,7 @@ class FlashcardResponse(BaseModel):
     example_sentence: str
     options: Optional[List[str]] = None
     correct_option_index: Optional[int] = None
+    image_data: Optional[str] = None
 
 
 class VocabularyAnswerRequest(BaseModel):
