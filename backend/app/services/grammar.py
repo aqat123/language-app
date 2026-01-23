@@ -44,34 +44,59 @@ async def get_grammar_question(
 
     level_info = f" at {level} level" if level else ""
     topic_info = f" about {topic}" if topic else ""
-    prompt = f"""Generate a multiple-choice grammar question for learning {target_language}{level_info}{topic_info}.
 
-Respond ONLY with valid JSON in this exact format:
-{{
-  "question_text": "The question text",
-  "options": ["option1", "option2", "option3", "option4"],
-  "correct_option_index": 0,
-  "explanation": "Brief explanation in English of why the correct answer is correct"
-}}"""
+    recent_logs = db.query(ContentLog) \
+        .filter(ContentLog.user_id == user.id, ContentLog.module == "vocabulary") \
+        .order_by(ContentLog.created_at.desc()) \
+        .limit(20) \
+        .all()
+
+    # Extract just the words
+    seen_words = []
+    for log in recent_logs:
+        if log.generated_content and isinstance(log.generated_content, dict):
+            word = log.generated_content.get("word")
+            if word:
+                seen_words.append(word)
+
+    exclusions = ", ".join(seen_words)
+
+    prompt = f"""Generate a multiple-choice grammar question for learning {target_language}{level_info}{topic_info}.
+    
+    IMPORTANT: Do not suggest any sentence that is too similar to: {exclusions}.
+    Please provide SHORT example sentences (MAX 12 words) that clearly illustrate the grammar point.
+
+    Respond ONLY with valid JSON in this exact format:
+    {{
+      "question_text": "The question text",
+      "options": ["option1", "option2", "option3", "option4"],
+      "correct_option_index": 0,
+      "explanation": "Brief explanation in English of why the correct answer is correct"
+    }}"""
 
     # Generate question
     response = await llm.generate(
         system_prompt=f"You are a language learning content creator. Always respond with valid JSON only.",
         user_prompt=prompt,
         temperature=0.7,
-        max_tokens=512
+        max_tokens=2048
     )
 
-    # Parse JSON
-    cleaned = response.strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned[7:]
-    if cleaned.startswith("```"):
-        cleaned = cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
+    try:
+        cleaned = response.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[7:]
+        if cleaned.startswith("```"):
+            cleaned = cleaned[3:]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3]
 
-    question_data = json.loads(cleaned.strip())
+        question_data = json.loads(cleaned.strip())
+    except (json.JSONDecodeError, ValueError) as e:
+        # Prevent 500 Crash
+        print(f"JSON Parse Error: {e}")
+        # Return a fallback or re-raise a clean error
+        raise ValueError("Failed to generate valid grammar question from AI.")
 
     # Check content
     checker_result = await checker.check_content(
@@ -85,7 +110,7 @@ Respond ONLY with valid JSON in this exact format:
     if not checker_result["is_valid"] and checker_result["suggested_fix"]:
         try:
             question_data = json.loads(checker_result["suggested_fix"])
-        except:
+        except (TypeError, json.JSONDecodeError, KeyError):
             pass
 
     # Generate question ID

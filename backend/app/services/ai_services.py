@@ -143,7 +143,7 @@ Respond ONLY with valid JSON in this exact format:
             )
 
             # Try to parse JSON from response
-            # Sometimes LLM adds markdown code blocks, so clean it up
+            # Sometimes LLM adds Markdown code blocks, so clean it up
             cleaned_response = response.strip()
             if cleaned_response.startswith("```json"):
                 cleaned_response = cleaned_response[7:]
