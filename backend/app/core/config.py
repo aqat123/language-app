@@ -20,7 +20,8 @@ class Settings(BaseSettings):
 
     # Speech-to-Text API Configuration
     STT_API_KEY: str
-    STT_API_BASE_URL: str = "https://speech.googleapis.com/v1"
+    STT_API_BASE_URL: str = "https://generativelanguage.googleapis.com/v1beta"
+    STT_MODEL: str = "gemini-2.5-flash"
 
     # Application Configuration
     ENV: str = "dev"

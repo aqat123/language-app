@@ -1,10 +1,11 @@
 import json
 from typing import Dict
 from sqlalchemy.orm import Session
+from uuid import uuid4
 from app.db.models import User, ContentLog, UserProgress
 from app.services.ai_services import get_llm_client
 from app.services.stt_client import get_stt_client
-from app.schemas.phonetics import PhoneticsEvaluationResponse
+from app.schemas.phonetics import PhoneticsEvaluationResponse, PhoneticsPracticeSession
 
 
 def calculate_similarity(text1: str, text2: str) -> float:
@@ -12,12 +13,65 @@ def calculate_similarity(text1: str, text2: str) -> float:
     words1 = text1.lower().split()
     words2 = text2.lower().split()
 
+    llm = get_llm_client()
+
     if not words1 or not words2:
         return 0.0
+    else:
+        comp_prompt = f"""
+        You are a text comparison AI. Given two texts, calculate the percentage of words in the first text that appear in the second text.
+        Text 1: "{text1}"
+        Text 2: "{text2}"
+        Respond ONLY with a number between 0 and 100 representing the percentage.
+        """
+        response = llm.generate(
+            system_prompt="You are a precise text comparison AI. Respond ONLY with a number.",
+            user_prompt=comp_prompt,
+            temperature=0.0,
+            max_tokens=10
+        )
+        try:
+            similarity = float(response.strip())
+            return max(0.0, min(100.0, similarity))
+        except (TypeError, ValueError):
+            return 0.0
 
-    matches = sum(1 for w in words1 if w in words2)
-    return (matches / max(len(words1), len(words2))) * 100
 
+async def generate_target_phrase(
+        target_language: str,
+        level: str
+) -> PhoneticsPracticeSession:
+    """Generate a random phrase and session ID."""
+    llm = get_llm_client()
+
+    prompt = f"""Generate a single, simple, natural sentence for pronunciation practice in {target_language} for a {level} level student.
+
+    Rules:
+    1. Length: 5-10 words.
+    2. No complex punctuation.
+    3. Respond ONLY with the sentence text. No quotes, no translations."""
+
+    phrase_text = "Hola, ¿cómo estás hoy?"  # Default fallback
+
+    try:
+        response = await llm.generate(
+            system_prompt="You are a language teacher.",
+            user_prompt=prompt,
+            temperature=0.9,
+            max_tokens=512
+        )
+        phrase_text = response.strip().replace('"', '')
+    except (ValueError, TypeError):
+        print("[DEBUG] LLM phrase generation failed, using fallback.")
+
+    # Generate the ID *after* the try/except block
+    session_id = str(uuid4())
+
+    # Return the full object
+    return PhoneticsPracticeSession(
+        session_id=session_id,
+        target_phrase=phrase_text
+    )
 
 async def evaluate_pronunciation(
     user_id: str,
@@ -40,7 +94,6 @@ async def evaluate_pronunciation(
         PhoneticsEvaluationResponse with transcript, score, and feedback
     """
     stt = get_stt_client()
-    llm = get_llm_client()
 
     # Find or create user
     user = db.query(User).filter(User.external_id == user_id).first()
@@ -51,59 +104,22 @@ async def evaluate_pronunciation(
         db.refresh(user)
 
     # Transcribe audio
-    stt_result = await stt.transcribe(audio_bytes, language_code=target_language)
-    transcript = stt_result["transcript"]
-    stt_confidence = stt_result["confidence"]
-
-    # Calculate basic similarity score
-    similarity = calculate_similarity(target_phrase, transcript)
-
-    # Get detailed feedback from LLM
-    feedback_prompt = f"""The target phrase is: "{target_phrase}"
-The student's pronunciation was transcribed as: "{transcript}"
-ASR confidence: {stt_confidence:.2f}
-
-Analyze the pronunciation differences and provide specific feedback.
-Give a pronunciation score between 0 and 100 (100 is perfect).
-Optionally provide word-level feedback if there are specific pronunciation issues.
-
-Respond ONLY with valid JSON in this exact format:
-{{
-  "score": 85,
-  "feedback": "Detailed feedback on pronunciation quality",
-  "word_level_feedback": {{"word1": "feedback", "word2": "feedback"}}
-}}
-
-If there are no significant word-level issues, set word_level_feedback to null."""
-
-    feedback_response = await llm.generate(
-        system_prompt="You are a pronunciation coach. Always respond with valid JSON only.",
-        user_prompt=feedback_prompt,
-        temperature=0.3,
-        max_tokens=512
+    analysis_result = await stt.analyze_audio(audio_bytes,
+    target_language=target_language,
+    target_phrase=target_phrase
     )
 
-    # Parse feedback
-    cleaned = feedback_response.strip()
-    if cleaned.startswith("```json"):
-        cleaned = cleaned[7:]
-    if cleaned.startswith("```"):
-        cleaned = cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
+    transcript = analysis_result.get("transcript", "")
+    stt_confidence = analysis_result.get("confidence", 0.0)
+    score = analysis_result.get("score", 0.0)
+    feedback = analysis_result.get("feedback", "No feedback provided.")
+    word_level_feedback = analysis_result.get("word_level_feedback", [])
 
-    try:
-        feedback_data = json.loads(cleaned.strip())
-        score = feedback_data.get("score", similarity)
-        feedback = feedback_data.get("feedback", "Good effort!")
-        word_level_feedback = feedback_data.get("word_level_feedback")
-    except:
-        # Fallback to simple scoring if LLM parsing fails
-        score = similarity
-        feedback = f"Your pronunciation was {similarity:.0f}% accurate."
-        word_level_feedback = None
+    # Voice recording error handling
+    if stt_confidence < 0.6:
+        feedback = f"⚠️ Low audio quality. Please try speaking again. (AI heard: '{transcript}')"
+        score = max(score, 10.0)
 
-    # Update user progress
     progress = db.query(UserProgress).filter(
         UserProgress.user_id == user.id,
         UserProgress.module == "phonetics"
@@ -119,7 +135,6 @@ If there are no significant word-level issues, set word_level_feedback to null."
         db.add(progress)
     else:
         progress.total_attempts += 1
-        # Update average score
         if progress.score is not None:
             progress.score = (progress.score + score) / 2
         else:
@@ -135,13 +150,8 @@ If there are no significant word-level issues, set word_level_feedback to null."
             "target_language": target_language,
             "target_phrase": target_phrase
         },
-        generated_content={
-            "transcript": transcript,
-            "score": score,
-            "feedback": feedback,
-            "word_level_feedback": word_level_feedback
-        },
-        checker_result=None,  # No checker for this module
+        generated_content=analysis_result,
+        checker_result=None,
         is_validated=True
     )
     db.add(content_log)
