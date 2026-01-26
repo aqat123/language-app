@@ -2,6 +2,9 @@ from google import genai
 from google.genai import types
 import logging
 import json
+import os
+from pathlib import Path
+import uuid
 
 # load config which is in thw lower directory
 from app.core.config import settings
@@ -25,7 +28,7 @@ class AIOrchestrator:
 
         # define two models: one for generation and one for checking (AI cross-check)
         # we use a lower temperature for the 'checker' to be more analytical
-        self.model_name = "gemini-2.5-flash"
+        self.model_name = "gemini-2.0-flash-exp"
 
     async def generate_reply(self, system_prompt: str, user_message: str, history: list) -> str:
         """
@@ -128,6 +131,46 @@ class AIOrchestrator:
         except Exception as e:
             logger.error(f"Vocab Check Error: {e}")
             return {"is_correct": False, "feedback": "Error validating answer."}
+        
+    
+    async def generate_image(self, prompt: str) -> str:
+        """
+        Need the paid API key
+        Generates an image using the Google Imagen 3 model.
+        Saves the resulting image to the local static directory and returns the relative path.
+        """
+        #defining the output directory
+        save_dir = Path("static/generated_images")
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            #request image generation and specifify Imagen 3 model
+            response = self.client.models.generate_images(
+                model='imagen-3.0-generate-001',
+                prompt=prompt,
+                config=types.GenerateImagesConfig(
+                    number_of_images=1,
+                    aspect_ratio="1:1"
+                )
+            )
+
+            #gets the raw image bytes
+            image_bytes = response.generated_images[0].image.image_bytes
+            
+            #creates a file name
+            filename = f"gen_{uuid.uuid4().hex[:8]}.png"
+            file_path = save_dir / filename
+
+            #write the data to the disk
+            with open(file_path, "wb") as f:
+                f.write(image_bytes)
+
+            #return the image url to the front
+            return f"/static/generated_images/{filename}"
+
+        except Exception as e:
+            logger.error(f"Image Gen Error: {e}")
+            return "https://via.placeholder.com/400?text=Upgrade+Key+For+Images"
 
 
 # Singleton instance to be imported elsewhere

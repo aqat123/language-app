@@ -43,3 +43,18 @@ async def check_vocab_guess(language: str, target_word: str, user_guess: str) ->
         guess=user_guess
     )
     return verdict
+
+async def get_vocab_image(word: str, language: str) -> str:
+    """
+    Creates a simple prompt for the external image generator.
+    """
+    #prompt to make sure style consistency
+    prompt = (
+        f"A high-quality, 3D render style educational illustration of a '{word}' "
+        f"(the {language} word). "
+        "Isolated on a clean white background. "
+        "Bright lighting, friendly style suitable for a language learning application. "
+        "No text or letters inside the image."
+    ) 
+    
+    return await ai_orchestrator.generate_image(prompt)

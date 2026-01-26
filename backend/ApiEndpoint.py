@@ -3,9 +3,10 @@ from pydantic import BaseModel
 from typing import List
 # Import your service functions
 import agentFunctions
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
-
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- Pydantic Models (Data Shapes) ---
 class ChatRequest(BaseModel):
@@ -50,7 +51,13 @@ async def generate_vocab_endpoint(request: VocabRequest):
     Generates a new word for the user to guess/visualize.
     """
     word = await agentFunctions.get_vocab_word(request.language)
-    return {"vocabulary_word": word}
+    
+    #gets the image
+    image_url = await agentFunctions.get_vocab_image(word, request.language)
+    return {
+        "vocabulary_word": word,
+        "image_url": image_url
+            }
 
 
 @app.post("/api/vocabulary/check")
