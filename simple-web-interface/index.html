@@ -67,6 +67,11 @@
                     <h3>Writing</h3>
                     <p>Get feedback on your writing</p>
                 </div>
+                <div class="module-card" onclick="startPhonetics()">
+                    <div class="module-icon">🎤</div>
+                    <h3>Pronunciation</h3>
+                    <p>Practice speaking and get AI feedback.</p>
+                </div>
             </div>
             <button onclick="showProgress()" class="btn btn-secondary">View Progress</button>
         </div>
@@ -129,6 +134,57 @@
         <div id="user-info" class="user-info hidden">
             <span id="user-display"></span>
         </div>
+
+        <!-- Phonetics Section -->
+        <div id="phonetics-section" class="section hidden">
+            <h2>🎤 Pronunciation Practice</h2>
+
+            <div class="flashcard" style="text-align: center; display: block; padding: 30px 20px;">
+                <p style="color: #666; margin-bottom: 15px; font-size: 0.95rem;">Read this phrase aloud:</p>
+                <div id="target-phrase" style="font-size: 1.6rem; font-weight: bold; color: #2c3e50; line-height: 1.4;">
+                    <div class="loading">Loading phrase...</div>
+                </div>
+            </div>
+
+            <div style="display: flex; flex-direction: column; align-items: center; margin: 30px 0; gap: 15px;">
+
+                <button id="record-btn" onclick="toggleRecording()" class="btn" style="
+                    background-color: #e74c3c;
+                    width: 80px;
+                    height: 80px;
+                    border-radius: 50%;
+                    font-size: 2.5rem;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    box-shadow: 0 4px 10px rgba(231, 76, 60, 0.4);
+                    transition: transform 0.1s;
+                    border: none;
+                ">
+                    🎙️
+                </button>
+                <div id="record-status" style="color: #666; font-size: 1rem; font-weight: 500;">Tap microphone to record</div>
+
+                <audio id="audio-preview" controls style="display: none; width: 100%; max-width: 320px; margin-top: 10px;"></audio>
+
+                <button id="validate-btn" onclick="validatePronunciation()" class="btn btn-primary" style="width: 100%; max-width: 320px;" disabled>
+                    Validate Pronunciation
+                </button>
+            </div>
+
+            <div id="phonetics-feedback" class="feedback hidden" style="text-align: left;">
+                <div id="phonetics-main-feedback"></div>
+
+                <div id="phonetics-word-feedback" style="margin-top: 20px;"></div>
+
+                <button onclick="startPhonetics()" class="btn btn-primary" style="margin-top: 25px; width: 100%;">
+                    Next Practice
+                </button>
+            </div>
+
+            <button onclick="backToModules()" class="btn btn-secondary" style="margin-top: 20px;">Back to Modules</button>
+        </div>
+
     </div>
 
     <script src="app.js"></script>
