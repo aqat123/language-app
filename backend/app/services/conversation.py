@@ -1,3 +1,40 @@
+"""
+Conversation Module Service Layer.
+
+Handles all business logic for the Conversation (chat) learning module:
+1. Start new conversation sessions with AI tutor
+2. Maintain conversation history for context-aware responses
+3. Validate AI responses for quality
+4. Track conversation statistics
+
+Key Features:
+- Stateful conversation sessions (session_id based)
+- Full conversation history maintained in database
+- Context-aware AI responses using message history
+- Optional corrections/tips for user messages
+- Session validation to prevent unauthorized access
+
+Key Functions:
+    start_conversation: Initiate new conversation session
+    send_message: Send user message and get AI response
+
+Workflow:
+    1. Create or find user
+    2. Generate initial AI message
+    3. Create conversation_sessions record
+    4. User sends messages that are appended to context
+    5. AI responds using full conversation history for context
+    6. Both user and AI messages stored in session
+    7. Statistics tracked for user progress
+
+Usage:
+    response = await start_conversation(request, db)
+    # session_id returned
+    
+    ai_response = await send_message(session_id, user_message, db)
+    # Returns AI tutor's response
+"""
+
 import json
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
@@ -17,14 +54,54 @@ async def start_conversation(
     db: Session
 ) -> ConversationStartResponse:
     """
-    Start a new conversation session.
+    Start a new conversation session with AI tutor.
+
+    Creates a new ConversationSession record and generates opening message
+    from AI in the target language.
 
     Args:
-        request: Conversation start request
+        request: ConversationStartRequest with:
+            - user_id: User identifier
+            - target_language: Language for conversation (Spanish, French, etc.)
+            - level: CEFR level (A1, A2, B1, etc.)
+            - topic: Optional conversation topic (e.g., "food", "travel")
         db: Database session
 
     Returns:
-        ConversationStartResponse with session_id and opening_message
+        ConversationStartResponse with:
+        - session_id: Unique conversation session identifier
+        - opening_message: Initial AI message in target language
+
+    Raises:
+        LLMError: If Gemini API call fails
+
+    Side Effects:
+        - Creates User record if not exists
+        - Creates ConversationSession record
+        - Logs content in content_logs table
+        - Updates user_progress conversation stats
+
+    Implementation Notes:
+        - AI responds in target language (not English)
+        - Opening message is short (1-2 sentences)
+        - System prompt sets friendly tutor personality
+        - Optional topic narrows conversation scope
+        - Checker AI validates response quality
+
+    Example:
+        >>> response = await start_conversation(
+        ...     ConversationStartRequest(
+        ...         user_id="maria",
+        ...         target_language="Spanish",
+        ...         level="A1",
+        ...         topic="food"
+        ...     ),
+        ...     db
+        ... )
+        >>> response.session_id
+        'f47ac10b-58cc-4372-a567-0e02b2c3d479'
+        >>> response.opening_message
+        '¡Hola! Me encanta hablar de comida. ¿Cuál es tu comida favorita?'
     """
     llm = get_llm_client()
     checker = get_checker_service()
@@ -112,15 +189,53 @@ async def send_message(
     db: Session
 ) -> ConversationMessageResponse:
     """
-    Send a message in a conversation session.
+    Send message in conversation session and get AI response.
+
+    Appends user message to conversation history and returns AI's context-aware
+    response. Full message history is maintained for natural conversation flow.
 
     Args:
-        session_id: Conversation session ID
-        request: Message request
+        session_id: Unique conversation session ID
+        request: ConversationMessageRequest with:
+            - user_id: User identifier (verified against session)
+            - message: User's message in target language
         db: Database session
 
     Returns:
-        ConversationMessageResponse with reply and optional corrections/tips
+        ConversationMessageResponse with:
+        - response: AI tutor's reply in target language
+        - corrected_message: (Optional) Corrected version of user's message
+        - tips: (Optional) Language tips for improvement
+
+    Raises:
+        ValueError: If session not found or user doesn't match session
+        LLMError: If Gemini API call fails
+
+    Side Effects:
+        - Appends both user and AI messages to context_json in DB
+        - Updates conversation_sessions updated_at timestamp
+        - Logs interaction in content_logs
+        - Updates user_progress conversation statistics
+
+    Implementation Notes:
+        - AI has access to full conversation history for context
+        - Messages formatted as: [{"role": "user"/"assistant", "content": "..."}]
+        - System prompt guides tutor behavior (friendly, encouraging)
+        - Temperature=0.7 allows natural variation in responses
+        - Context window limited to prevent memory exhaustion
+        - User message is verified to belong to session owner
+
+    Example:
+        >>> response = await send_message(
+        ...     "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+        ...     ConversationMessageRequest(
+        ...         user_id="maria",
+        ...         message="Me gusta la pizza"
+        ...     ),
+        ...     db
+        ... )
+        >>> response.response
+        '¡Excelente! Pizza es muy deliciosa. ¿Cuál es tu tipo favorito?'
     """
     llm = get_llm_client()
     checker = get_checker_service()

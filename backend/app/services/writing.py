@@ -1,3 +1,38 @@
+"""
+Writing Module Service Layer.
+
+Handles all business logic for the Writing (essay correction) learning module:
+1. Accept written text from user in target language
+2. Use AI to correct grammar, vocabulary, and style
+3. Provide detailed feedback with explanations
+4. Score writing quality (0-100)
+5. Track writing progress
+
+Key Features:
+- Detailed error correction with explanations
+- Security: Input sanitization to prevent prompt injection
+- JSON responses with structured feedback
+- Fallback handling for AI failures
+- Validation of corrections using checker AI
+
+Key Functions:
+    get_writing_feedback: Analyze writing and return corrections
+
+Workflow:
+    1. Find/create user
+    2. Sanitize user input (security)
+    3. Create AI prompt with security sandbox
+    4. Call Gemini to correct text
+    5. Parse JSON response
+    6. Validate corrections with checker AI
+    7. Save to content_logs
+    8. Return feedback to user
+
+Usage:
+    feedback = await get_writing_feedback(request, db)
+    # Returns corrected text, errors, and score
+"""
+
 import json
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -11,7 +46,62 @@ async def get_writing_feedback(
         db: Session
 ) -> WritingFeedbackResponse:
     """
-    Get feedback on user's writing.
+    Provide comprehensive feedback on user's written text.
+
+    Analyzes text for grammar, vocabulary, and style errors.
+    Provides corrections with detailed explanations.
+
+    Args:
+        request: WritingFeedbackRequest with:
+            - user_id: User identifier
+            - text: Text to correct (in target language)
+            - target_language: Language being analyzed
+            - level: CEFR level for appropriate feedback
+        db: Database session
+
+    Returns:
+        WritingFeedbackResponse with:
+        - corrected_text: Fully corrected version
+        - overall_comment: General feedback summary
+        - inline_explanation: Detailed error explanations
+        - score: Quality score (0-100)
+
+    Raises:
+        LLMError: If Gemini API call fails
+
+    Side Effects:
+        - Creates User record if not exists
+        - Logs feedback in content_logs
+        - Updates user_progress writing statistics
+        - Records corrected_text for audit
+
+    Security Notes:
+        - User input sanitized: removes closing tags
+        - Prompt uses "sandbox" XML wrapper
+        - Input treated as data, not instructions
+        - Prevents prompt injection attacks
+
+    Implementation Notes:
+        - temperature=0.3 for accuracy (less creative)
+        - max_tokens=8192 for handling long essays
+        - Uses XML tags to separate data from instructions
+        - Fallback response if AI fails: score=0, error message
+        - Checker AI validates corrections quality
+
+    Example:
+        >>> feedback = await get_writing_feedback(
+        ...     WritingFeedbackRequest(
+        ...         user_id="maria",
+        ...         text="Yo voy al escuela todos los días",
+        ...         target_language="Spanish",
+        ...         level="A1"
+        ...     ),
+        ...     db
+        ... )
+        >>> feedback.corrected_text
+        'Yo voy a la escuela todos los días'
+        >>> feedback.score
+        90
     """
     llm = get_llm_client()
     checker = get_checker_service()

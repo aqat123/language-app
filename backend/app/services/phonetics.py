@@ -1,3 +1,44 @@
+"""
+Phonetics Module Service Layer.
+
+Handles all business logic for the Phonetics (pronunciation) learning module:
+1. Generate target phrases for pronunciation practice
+2. Process audio files using Speech-to-Text (STT)
+3. Compare user's speech to target phrase
+4. Provide pronunciation feedback and score
+5. Track pronunciation progress
+
+Key Features:
+- Speech-to-Text integration (Google Cloud API)
+- Word-level similarity comparison
+- Pronunciation quality feedback from AI
+- Fallback phrases if generation fails
+- Error handling for audio processing
+
+Key Functions:
+    calculate_similarity: Compare two texts at word level
+    generate_target_phrase: Create random phrase for practice
+    evaluate_pronunciation: Analyze user's pronunciation
+
+Workflow:
+    1. Generate target phrase in target language
+    2. User records audio of themselves saying phrase
+    3. STT transcribes audio to text
+    4. Compare transcribed vs target text
+    5. AI provides pronunciation feedback
+    6. Calculate similarity score (0-100)
+    7. Return feedback and score to user
+
+Usage:
+    session = await generate_target_phrase("Spanish", "A1")
+    # Returns phrase like: "Hola, ¿cómo estás?"
+    
+    evaluation = await evaluate_pronunciation(
+        "maria", "Spanish", "Hola, ¿cómo estás?", audio_bytes, db
+    )
+    # Returns score, transcript, feedback
+"""
+
 import json
 from typing import Dict
 from sqlalchemy.orm import Session
@@ -9,7 +50,34 @@ from app.schemas.phonetics import PhoneticsEvaluationResponse, PhoneticsPractice
 
 
 def calculate_similarity(text1: str, text2: str) -> float:
-    """Calculate simple word-level similarity between two texts."""
+    """
+    Calculate word-level similarity between two texts.
+
+    Compares how many words from text1 appear in text2.
+    Uses AI for more accurate comparison than simple word matching.
+
+    Args:
+        text1: First text (user's transcription)
+        text2: Second text (target phrase)
+
+    Returns:
+        Similarity percentage (0-100)
+
+    Implementation Notes:
+        - Returns 0 if either text is empty
+        - Uses Gemini API for accurate comparison
+        - temperature=0.0 for deterministic results
+        - Handles parsing errors gracefully (returns 0)
+        - Returns clamped value [0, 100]
+
+    Example:
+        >>> similarity = calculate_similarity(
+        ...     "Hola como estás",
+        ...     "Hola, ¿cómo estás?"
+        ... )
+        >>> similarity
+        100.0
+    """
     words1 = text1.lower().split()
     words2 = text2.lower().split()
 
@@ -41,7 +109,33 @@ async def generate_target_phrase(
         target_language: str,
         level: str
 ) -> PhoneticsPracticeSession:
-    """Generate a random phrase and session ID."""
+    """
+    Generate random phrase for pronunciation practice.
+
+    Creates a short, natural sentence at appropriate level for student
+    to practice speaking aloud.
+
+    Args:
+        target_language: Language code (Spanish, French, German, etc.)
+        level: CEFR level (A1, A2, B1, B2, C1, C2)
+
+    Returns:
+        PhoneticsPracticeSession with:
+        - session_id: Unique ID for this practice session
+        - target_phrase: The phrase to pronounce
+
+    Implementation Notes:
+        - Phrase length: 5-10 words (manageable for learners)
+        - No complex punctuation
+        - Natural, conversational sentences
+        - Uses fallback if generation fails
+        - temperature=0.9 for variety
+
+    Example:
+        >>> session = await generate_target_phrase("Spanish", "A1")
+        >>> session.target_phrase
+        'Hola, ¿cómo estás hoy?'
+    """
     llm = get_llm_client()
 
     prompt = f"""Generate a single, simple, natural sentence for pronunciation practice in {target_language} for a {level} level student.
@@ -81,17 +175,59 @@ async def evaluate_pronunciation(
     db: Session
 ) -> PhoneticsEvaluationResponse:
     """
-    Evaluate pronunciation using STT and LLM analysis.
+    Evaluate user's pronunciation using STT and AI analysis.
+
+    Complete workflow:
+    1. Transcribe audio using Google Speech-to-Text
+    2. Compare transcription with target phrase
+    3. Use AI to evaluate pronunciation quality
+    4. Calculate similarity score
+    5. Save results to database
+    6. Return feedback
 
     Args:
-        user_id: External user ID
-        target_language: Target language code (e.g., "en-US", "es-ES")
-        target_phrase: Expected phrase
-        audio_bytes: Audio file bytes
-        db: Database session
+        user_id: Unique user identifier
+        target_language: Target language code (es-ES, fr-FR, de-DE, etc.)
+        target_phrase: The phrase user should pronounce
+        audio_bytes: Audio file as bytes (WAV, MP3, etc.)
+        db: SQLAlchemy database session
 
     Returns:
-        PhoneticsEvaluationResponse with transcript, score, and feedback
+        PhoneticsEvaluationResponse with:
+        - transcribed_text: What STT heard
+        - similarity_score: Match percentage (0-100)
+        - feedback: Pronunciation tips and improvements
+        - suggestions: List of things to work on
+
+    Raises:
+        ValueError: If audio cannot be transcribed
+        LLMError: If Gemini API call fails
+
+    Side Effects:
+        - Creates User record if not exists
+        - Logs evaluation in content_logs
+        - Updates user_progress phonetics stats
+
+    Implementation Notes:
+        - STT may have errors with accents/dialects
+        - Similarity calculated word-by-word
+        - AI feedback focuses on pronunciation patterns
+        - temperature=0.5 for balanced feedback
+        - Stores both transcription and target for audit
+        - Similarity clamped to [0, 100]
+
+    Example:
+        >>> evaluation = await evaluate_pronunciation(
+        ...     "maria",
+        ...     "Spanish",
+        ...     "Hola, ¿cómo estás?",
+        ...     audio_file_bytes,
+        ...     db
+        ... )
+        >>> evaluation.similarity_score
+        85.5
+        >>> evaluation.transcribed_text
+        'Hola como estás'
     """
     stt = get_stt_client()
 

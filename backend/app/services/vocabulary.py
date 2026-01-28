@@ -1,3 +1,34 @@
+"""
+Vocabulary Module Service Layer.
+
+Handles all business logic for the Vocabulary learning module:
+1. Generate AI flashcards (word + definition + multiple-choice options)
+2. Validate content quality before showing to users
+3. Record user answers and calculate statistics
+4. Track progress and avoid showing repeated words
+
+Key Functions:
+    get_next_flashcard: Generate new vocabulary flashcard for user
+    submit_vocabulary_answer: Record user answer and update progress
+
+Workflow:
+    1. Find/create user in database
+    2. Get list of recently shown words to avoid repetition
+    3. Create AI prompt with exclusions
+    4. Call Gemini to generate flashcard JSON
+    5. Parse response (strip markdown code blocks if present)
+    6. Validate with checker AI
+    7. Save to content_logs for audit
+    8. Return flashcard to endpoint
+
+Usage:
+    flashcard = await get_next_flashcard("maria", "Spanish", "A1", db)
+    # Returns FlashcardResponse with word, options, etc.
+    
+    answer = await submit_vocabulary_answer(request, db)
+    # Records answer and updates user_progress table
+"""
+
 import json
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -23,16 +54,52 @@ async def get_next_flashcard(
     db: Session
 ) -> FlashcardResponse:
     """
-    Generate a vocabulary flashcard.
+    Generate next vocabulary flashcard for user.
+
+    Complete workflow:
+    1. Find or auto-create user in database
+    2. Query recent words to avoid repetition (last 20)
+    3. Create AI prompt with exclusion list
+    4. Call Gemini to generate JSON flashcard
+    5. Parse response and strip markdown code blocks
+    6. Validate with checker AI (verify accuracy)
+    7. Save to content_logs for audit trail
+    8. Return flashcard to endpoint
 
     Args:
-        user_id: External user ID
-        target_language: Target language
-        level: Difficulty level
-        db: Database session
+        user_id: Unique user identifier (string from frontend)
+        target_language: Target language code (e.g., "Spanish", "French")
+        level: CEFR level (A1, A2, B1, B2, C1, C2) or None for default
+        db: SQLAlchemy database session
 
     Returns:
-        FlashcardResponse with word, definition, example, and options
+        FlashcardResponse containing:
+        - word: Target language vocabulary word
+        - definition: English definition
+        - example_sentence: Example sentence using word (max 12 words)
+        - options: List of 4 English definitions (1 correct, 3 plausible distractors)
+        - correct_option_index: Index of correct answer (0-3)
+
+    Raises:
+        ValueError: If level is not valid CEFR level
+        LLMError: If Gemini API call fails (rate limited, auth error)
+        JSONDecodeError: If response is not valid JSON after cleanup
+
+    Implementation Notes:
+        - Gemini often wraps JSON in ```json``` markdown blocks
+        - We strip these blocks before parsing
+        - Checker AI validates that definition matches word
+        - content_logs stores generated word for repetition avoidance
+        - temperature=0.7 for vocabulary (allows creativity)
+
+    Example:
+        >>> flashcard = await get_next_flashcard("maria", "Spanish", "A1", db)
+        >>> flashcard.word
+        'Gato'
+        >>> flashcard.options
+        ['Cat', 'Dog', 'Bird', 'Fish']
+        >>> flashcard.correct_option_index
+        0
     """
     llm = get_llm_client()
     checker = get_checker_service()
@@ -192,15 +259,43 @@ async def submit_vocabulary_answer(
     db: Session
 ) -> VocabularyAnswerResponse:
     """
-    Submit a vocabulary answer and get feedback.
+    Submit vocabulary answer and update user progress.
 
+    Records whether the user's answer was correct and updates statistics.
 
     Args:
-        request: Answer submission request
+        request: VocabularyAnswerRequest with:
+            - user_id: User identifier
+            - selected_option_index: Index of selected answer (0-3)
+            - correct_option_index: Index of correct answer (0-3)
         db: Database session
 
     Returns:
-        VocabularyAnswerResponse with correctness and explanation
+        VocabularyAnswerResponse with:
+        - is_correct: Whether answer was correct (bool)
+        - correct_option_index: Index of correct answer
+        - explanation: Brief feedback message
+
+    Raises:
+        ValueError: If user not found in database
+
+    Side Effects:
+        Updates user_progress table:
+        - Increments total_attempts
+        - Increments correct_attempts if answer is correct
+        - Recalculates score percentage
+
+    Example:
+        >>> response = await submit_vocabulary_answer(
+        ...     VocabularyAnswerRequest(
+        ...         user_id="maria",
+        ...         selected_option_index=0,
+        ...         correct_option_index=0
+        ...     ),
+        ...     db
+        ... )
+        >>> response.is_correct
+        True
     """
     user = db.query(User).filter(User.external_id == request.user_id).first()
     if not user:

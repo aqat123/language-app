@@ -1,9 +1,41 @@
+"""
+Image Generation Client Module.
+
+Handles image generation for vocabulary learning using Google Imagen 4 API.
+Generates safe, educational images to accompany vocabulary words.
+
+Key Features:
+- REST API integration with Imagen 4 image generation model
+- Base64 encoded image output
+- Safety filtering (cartoon style, minimalist, educational)
+- Error handling and graceful fallback (returns None on failure)
+- Configurable aspect ratio (1:1 for flashcard display)
+
+Main Classes:
+    ImageGenClient: Client for Imagen 4 API communication
+    
+Main Functions:
+    get_image_client: Singleton factory for ImageGenClient
+
+Usage Example:
+    >>> client = get_image_client()
+    >>> image_b64 = await client.generate_safe_image("cat, a domestic animal")
+    >>> if image_b64:
+    ...     display_image(image_b64)  # Use in frontend
+    >>> await client.close()
+"""
+
 import httpx
 from typing import Optional
 from app.core.config import settings
 
 class ImageGenClient:
-    """Client dedicated to interacting with Image Generation API (Imagen 4)."""
+    """
+    Client for Google Imagen 4 Image Generation API.
+    
+    Generates educational, safe images for vocabulary learning.
+    Images are styled as cartoon illustrations with minimalist design.
+    """
 
     def __init__(self, api_key: str, base_url: str, model: str):
         self.api_key = api_key
@@ -13,8 +45,51 @@ class ImageGenClient:
 
     async def generate_safe_image(self, prompt: str) -> Optional[str]:
         """
-        Generate a safe image based on the prompt using Imagen 4.
-        Returns: base64 encoded image string OR None if generation fails.
+        Generate safe, educational image for vocabulary word.
+
+        Creates a cartoon-style illustration based on the prompt.
+        Image is automatically styled as minimalist, educational, and safe.
+
+        Args:
+            prompt: Description of what to illustrate (e.g., "cat" or "cat, a domestic animal")
+
+        Returns:
+            Base64-encoded image string if successful, None if generation fails
+
+        Implementation Notes:
+            - Automatically adds safety modifiers to prompt (cartoon style, minimalist, white bg)
+            - Uses 1:1 aspect ratio for flashcard display
+            - Returns None gracefully if:
+              - API returns non-200 status
+              - Response JSON is malformed
+              - Predictions array is empty
+              - Base64 encoding is missing
+            - Logs errors to console for debugging
+            - Timeout: 30 seconds per request
+
+        Error Handling:
+            - HTTP errors (400, 401, 403, 429, 500): Logged, returns None
+            - JSON parsing errors: Logged, returns None
+            - Missing keys in response: Logged, returns None
+            - Exception during generation: Caught, logged, returns None
+
+        Imagen 4 Response Format:
+            {
+                "predictions": [{
+                    "bytesBase64Encoded": "base64_image_string"
+                    OR "b64": "base64_image_string"
+                }]
+            }
+
+        Example:
+            >>> client = get_image_client()
+            >>> image_b64 = await client.generate_safe_image("Spanish cat")
+            >>> if image_b64:
+            ...     # Send to frontend
+            ...     return {"image_data": image_b64}
+            >>> else:
+            ...     # Fallback: no image
+            ...     return {"image_data": None}
         """
         try:
             # Construct endpoint URL
@@ -69,13 +144,35 @@ class ImageGenClient:
             return None
 
     async def close(self):
+        """Close the HTTP client connection cleanly."""
         await self.client.aclose()
 
 _image_client: Optional[ImageGenClient] = None
 
 
 def get_image_client() -> ImageGenClient:
-    """Get singleton ImageGenClient instance."""
+    """
+    Get or create the singleton ImageGenClient instance.
+
+    Lazy initialization: Creates client on first call, reuses same instance
+    on subsequent calls. Credentials loaded from environment (.env file).
+
+    Returns:
+        ImageGenClient instance configured with API credentials
+
+    Implementation Notes:
+        - Thread-safe singleton pattern
+        - Credentials from app.core.config.settings:
+          - LLM_IMAGE_API_KEY: Gemini API key
+          - LLM_IMAGE_API_BASE_URL: Imagen 4 endpoint base URL
+          - LLM_IMAGE_MODEL: Model identifier (imagen-4.0-fast-generate-001)
+        - Same instance reused across application
+        - Client remains open until explicitly closed
+
+    Example:
+        >>> client = get_image_client()
+        >>> image = await client.generate_safe_image("Spanish cat")
+    """
     global _image_client
     if _image_client is None:
         _image_client = ImageGenClient(

@@ -1,3 +1,31 @@
+"""
+AI Services Module - Gemini API Integration and Content Validation.
+
+This module provides core AI functionality for the Language Learning App:
+1. LLMClient: Wrapper for Google Gemini API calls
+2. CheckerService: Validates AI-generated content for accuracy
+
+Key Features:
+- Async HTTP client for Gemini API communication
+- JSON response parsing (handles markdown code block wrapping)
+- Content validation using a separate "checker" AI
+- Error handling with custom LLMError exception
+
+Main Classes:
+    LLMClient: Generate content using Gemini API
+    CheckerService: Validate generated content quality
+    LLMError: Custom exception for LLM-related errors
+
+Usage Example:
+    >>> llm = LLMClient(api_key="...", base_url="...", model="gemini-1.5-flash")
+    >>> response = await llm.generate(
+    ...     system_prompt="You are a language teacher",
+    ...     user_prompt="Generate a Spanish vocabulary word",
+    ...     temperature=0.7
+    ... )
+    >>> await llm.close()
+"""
+
 import httpx
 import json
 from typing import Dict, Any, Optional
@@ -27,19 +55,38 @@ class LLMClient:
         max_tokens: int = 512
     ) -> str:
         """
-        Call the LLM with the given prompts and return the generated text.
+        Generate content using Google Gemini API.
+
+        Sends a combined prompt to Gemini and returns the raw response text.
+        Automatically extracts text from the nested Gemini response structure.
 
         Args:
-            system_prompt: System-level instructions for the LLM
-            user_prompt: User input/query
-            temperature: Controls randomness (0.0-1.0)
-            max_tokens: Maximum tokens to generate
+            system_prompt: System-level instructions (e.g., "You are a language teacher")
+            user_prompt: User input/query (e.g., "Generate a vocabulary word")
+            temperature: Creativity level (0.0=deterministic, 1.0=creative)
+                        Use 0.3 for grammar (needs accuracy)
+                        Use 0.7 for vocabulary (can be creative)
+            max_tokens: Maximum response length (prevents long outputs)
 
         Returns:
-            Generated text from the LLM
+            Raw response text from Gemini (may contain markdown code blocks)
 
         Raises:
-            LLMError: If the API call fails
+            LLMError: If HTTP request fails or response format is unexpected
+            
+        Note:
+            Responses are often wrapped in ```json``` code blocks.
+            Caller is responsible for parsing/cleaning the response.
+            
+        Example:
+            >>> response = await llm.generate(
+            ...     system_prompt="You are a Spanish teacher",
+            ...     user_prompt="Generate an A1 vocabulary word as JSON",
+            ...     temperature=0.7,
+            ...     max_tokens=512
+            ... )
+            >>> print(response)
+            '```json\\n{"word": "Gato", ...}\\n```'
         """
         try:
             # Combine system and user prompts for Gemini API
@@ -83,12 +130,20 @@ class LLMClient:
             raise LLMError(f"Error during LLM generation: {str(e)}")
 
     async def close(self):
-        """Close the HTTP client."""
+        """Close the HTTP client connection."""
         await self.client.aclose()
 
 
 class CheckerService:
-    """Service for validating AI-generated content using LLM as a checker."""
+    """
+    Content Validation Service using AI.
+
+    Validates AI-generated content to ensure accuracy before showing to users.
+    Part of the "Generate then Verify" pattern to prevent AI hallucinations.
+    
+    This service uses a separate LLM instance to critique content generated
+    by the main LLM, providing an additional quality assurance layer.
+    """
 
     def __init__(self, llm_client: LLMClient):
         self.llm = llm_client
@@ -102,16 +157,37 @@ class CheckerService:
         generated_content: str
     ) -> Dict[str, Any]:
         """
-        Use LLM to critique/verify generated content.
+        Validate AI-generated content using another LLM call.
+
+        Part of "Generate then Verify" pattern:
+        1. Generate content (main LLM)
+        2. Validate content (checker LLM) <- This function
+        3. If valid, use; if invalid, regenerate or use fallback
 
         Args:
-            module: The learning module (e.g., "conversation", "vocabulary")
-            original_instruction: The original prompt/instruction
-            user_input: User input data as dict
-            generated_content: The content to validate
+            module: The learning module name (vocabulary, grammar, writing, etc.)
+            original_instruction: The prompt used to generate content
+            user_input: Input parameters as dict (language, level, topic, etc.)
+            generated_content: The content to validate (usually JSON string)
 
         Returns:
-            Dict with keys: is_valid (bool), issues (list), suggested_fix (str or None)
+            Dict with keys:
+            - is_valid (bool): Whether content passes validation
+            - issues (list): List of identified problems (if any)
+            - suggested_fix (str or None): Corrected version (if available)
+
+        Raises:
+            LLMError: If validation API call fails
+
+        Example:
+            >>> result = await checker.check_content(
+            ...     module="vocabulary",
+            ...     original_instruction="Generate Spanish word",
+            ...     user_input={"language": "Spanish", "level": "A1"},
+            ...     generated_content='{"word": "Gato", "definition": "Cat"}'
+            ... )
+            >>> print(result["is_valid"])
+            True
         """
         user_input_json = json.dumps(user_input, indent=2)
 

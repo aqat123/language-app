@@ -1,3 +1,40 @@
+"""
+Grammar Module Service Layer.
+
+Handles all business logic for the Grammar learning module:
+1. Generate grammar questions with multiple-choice options
+2. Create plausible distractors for realistic challenges
+3. Validate question quality before showing to users
+4. Record user answers and calculate statistics
+5. Track progress and avoid question repetition
+
+Key Functions:
+    get_grammar_question: Generate new grammar question
+    submit_grammar_answer: Record user answer and update progress
+
+Workflow:
+    1. Find/create user in database
+    2. Get list of recent questions to avoid repetition
+    3. Create AI prompt requesting grammar question
+    4. Call Gemini to generate JSON question
+    5. Parse response (strip markdown code blocks if present)
+    6. Validate with checker AI
+    7. Save to content_logs for audit
+    8. Return question to endpoint
+
+Question Format:
+    - Sentence with blank (____)
+    - 4 options (1 correct, 3 plausible distractors)
+    - Explanation of grammar rule
+    
+Usage:
+    question = await get_grammar_question("maria", "Spanish", "A1", None, db)
+    # Returns GrammarQuestionResponse with question and options
+    
+    result = await submit_grammar_answer(request, db)
+    # Records answer and updates user_progress table
+"""
+
 import json
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -15,17 +52,55 @@ async def get_grammar_question(
     db: Session
 ) -> GrammarQuestionResponse:
     """
-    Generate a grammar question.
+    Generate grammar question for user.
+
+    Complete workflow:
+    1. Find or auto-create user
+    2. Query recent questions to avoid repetition (last 20)
+    3. Create AI prompt with exclusion list and optional topic
+    4. Call Gemini to generate JSON question
+    5. Parse response and strip markdown code blocks
+    6. Validate with checker AI
+    7. Save to content_logs for audit
+    8. Return question to endpoint
 
     Args:
-        user_id: External user ID
-        target_language: Target language
-        level: Difficulty level
-        topic: Grammar topic (e.g., "past tense", "articles")
-        db: Database session
+        user_id: Unique user identifier
+        target_language: Target language (Spanish, French, German, etc.)
+        level: CEFR level (A1, A2, B1, B2, C1, C2) or None for default
+        topic: Optional grammar topic (past tense, articles, subjunctive, etc.)
+        db: SQLAlchemy database session
 
     Returns:
-        GrammarQuestionResponse with question and options
+        GrammarQuestionResponse with:
+        - question_text: The grammar question
+        - options: List of 4 answer options
+        - correct_option_index: Index of correct answer (0-3)
+        - explanation: Why the correct answer is correct
+        - question_id: Unique ID for tracking
+
+    Raises:
+        ValueError: If AI response is not valid JSON
+        LLMError: If Gemini API call fails
+
+    Implementation Notes:
+        - Options are 4 plausible completions (1 correct, 3 distractors)
+        - Distractors target common learner mistakes
+        - Explanation teaches the grammar rule
+        - temperature=0.7 for variety while maintaining correctness
+        - max_tokens=2048 for detailed explanations
+        - Topic parameter narrows focus (if provided)
+
+    Example:
+        >>> question = await get_grammar_question(
+        ...     "maria", "Spanish", "A1", "past tense", db
+        ... )
+        >>> question.question_text
+        'Ayer _____ al parque con mis amigos.'
+        >>> question.options
+        ['fui', 'voy', 'iré', 'vaya']
+        >>> question.correct_option_index
+        0
     """
     llm = get_llm_client()
     checker = get_checker_service()
@@ -165,14 +240,46 @@ async def submit_grammar_answer(
     db: Session
 ) -> GrammarAnswerResponse:
     """
-    Submit a grammar answer and get feedback.
+    Submit grammar answer and update user progress.
+
+    Records answer correctness and updates user statistics.
 
     Args:
-        request: Answer submission request
+        request: GrammarAnswerRequest with:
+            - user_id: User identifier
+            - question_id: Question that was answered
+            - selected_option_index: Index of selected answer (0-3)
+            - correct_option_index: Index of correct answer (0-3)
         db: Database session
 
     Returns:
-        GrammarAnswerResponse with correctness and explanation
+        GrammarAnswerResponse with:
+        - is_correct: Whether answer was correct (bool)
+        - correct_option_index: Index of correct answer
+        - explanation: Explanation of the grammar rule
+
+    Raises:
+        ValueError: If user not found
+
+    Side Effects:
+        Updates user_progress table:
+        - Increments total_attempts
+        - Increments correct_attempts if correct
+        - Recalculates score percentage
+        - Updates last_activity_at timestamp
+
+    Example:
+        >>> response = await submit_grammar_answer(
+        ...     GrammarAnswerRequest(
+        ...         user_id="maria",
+        ...         question_id="q123",
+        ...         selected_option_index=0,
+        ...         correct_option_index=0
+        ...     ),
+        ...     db
+        ... )
+        >>> response.is_correct
+        True
     """
     user = db.query(User).filter(User.external_id == request.user_id).first()
     if not user:
