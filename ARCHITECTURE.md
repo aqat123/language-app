@@ -144,7 +144,7 @@ For vocabulary example: checker confirms word exists, definition is accurate, an
 
 ### Tables
 
-#### users Table
+#### `users` Table
 
 Stores user account information and learning context.
 
@@ -156,7 +156,7 @@ Stores user account information and learning context.
 | level | String | Proficiency level (A1, A2, B1, B2, C1, C2) |
 | created_at | Timestamp | Account creation timestamp |
 
-#### user_progress Table
+#### `user_progress` Table
 
 Tracks performance across all modules. One record per user per module.
 
@@ -170,7 +170,7 @@ Tracks performance across all modules. One record per user per module.
 | correct_attempts | Integer | Number of correct responses |
 | last_updated | Timestamp | Last activity timestamp |
 
-#### conversation_sessions Table
+#### `conversation_sessions` Table
 
 Maintains context for ongoing conversation sessions.
 
@@ -185,7 +185,7 @@ Maintains context for ongoing conversation sessions.
 | created_at | Timestamp | Session start time |
 | last_updated | Timestamp | Last message timestamp |
 
-#### content_logs Table
+#### `content_logs` Table
 
 Permanent audit trail of all AI-generated content.
 
@@ -273,31 +273,59 @@ Users should be able to:
 
 ## Request/Response Example: Vocabulary Module Execution
 
-### Step 1: User Initiates Request
+Complete walkthrough of a user requesting and answering a vocabulary flashcard.
+
+### Step 1: User Clicks "Vocabulary" Button
 
 **Browser (index.html):**
+```html
+<div class="module-card" onclick="startVocabulary()">
+    <div class="module-icon">📚</div>
+    <h3>Vocabulary</h3>
+    <p>Learn new words with flashcards</p>
+</div>
+```
+
+### Step 2: JavaScript Function Runs
+
+**File: `simple-web-interface/app.js`**
 ```javascript
-// User clicks "Vocabulary" button
 async function startVocabulary() {
-    document.getElementById('flashcard').innerHTML = '<div class="loading">Loading...</div>';
+    // 1. Switch to vocabulary screen
+    showSection('vocabulary-section');
     
+    // 2. Show loading message
+    document.getElementById('flashcard').innerHTML = 
+        '<div class="loading">Loading flashcard...</div>';
+    
+    // 3. Make API call to backend
     const response = await fetch(
         `http://localhost:8000/api/v1/vocabulary/next?user_id=maria&target_language=Spanish&level=A1`
     );
     
+    // 4. Get the JSON response
     currentFlashcard = await response.json();
+    
+    // 5. Display it on screen
     displayFlashcard();
 }
 ```
 
-**HTTP Request:**
+### Step 3: HTTP Request Goes to Backend
+
+**Request Details:**
 ```http
-GET /api/v1/vocabulary/next?user_id=maria&target_language=Spanish&level=A1
+GET http://localhost:8000/api/v1/vocabulary/next?user_id=maria&target_language=Spanish&level=A1
 ```
 
-### Step 2: Backend Receives and Routes Request
+**Query Parameters:**
+- `user_id`: "maria"
+- `target_language`: "Spanish"
+- `level`: "A1"
 
-**Backend (app/api/v1/endpoints/vocabulary.py):**
+### Step 4: Backend Receives Request
+
+**File: `backend/app/api/v1/endpoints/vocabulary.py`**
 ```python
 @router.get("/next", response_model=FlashcardResponse)
 async def get_flashcard(
@@ -306,15 +334,22 @@ async def get_flashcard(
     level: Optional[str] = Query(None),
     db: Session = Depends(get_db)
 ):
-    # Pydantic validates parameters
-    # Database session created
-    # Call service layer
-    return await get_next_flashcard(user_id, target_language, level, db)
+    """Get next vocabulary flashcard."""
+    try:
+        # Calls the service layer
+        return await get_next_flashcard(user_id, target_language, level, db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 ```
 
-### Step 3: Service Layer Generates Content
+**What happens:**
+- FastAPI validates the parameters
+- Creates a database session
+- Calls the service function
 
-**Backend (app/services/vocabulary.py):**
+### Step 5: Service Layer Generates Content
+
+**File: `backend/app/services/vocabulary.py`**
 ```python
 async def get_next_flashcard(
     user_id: str,
@@ -322,36 +357,65 @@ async def get_next_flashcard(
     level: Optional[str],
     db: Session
 ) -> FlashcardResponse:
-    # 1. Find or create user
+    # 1. Get AI client
+    llm = get_llm_client()
+    checker = get_checker_service()
+    
+    # 2. Find or create user in database
     user = db.query(User).filter(User.external_id == user_id).first()
     if not user:
-        user = User(external_id=user_id, target_language=target_language, level=level)
+        user = User(
+            external_id=user_id,
+            target_language=target_language,
+            level=level
+        )
         db.add(user)
         db.commit()
     
-    # 2. Create AI prompt
-    prompt = f"""Generate a vocabulary flashcard for learning {target_language} at {level} level.
-    
-Respond ONLY with valid JSON:
+    # 3. Create AI prompt
+    level_info = f" at {level} level" if level else ""
+    prompt = f"""Generate a vocabulary flashcard for learning {target_language}{level_info}.
+
+Respond ONLY with valid JSON in this exact format:
 {{
   "word": "word in {target_language}",
   "definition": "definition in English",
-  "example_sentence": "example in {target_language}",
-  "options": ["def1", "def2", "def3", "def4"],
+  "example_sentence": "example sentence using the word in {target_language}",
+  "options": ["option1", "option2", "option3", "option4"],
   "correct_option_index": 0
-}}"""
+}}
+
+The options should be 4 English definitions (one correct, three plausible distractors)."""
     
-    # 3. Call Gemini LLM
-    response = await llm.generate(prompt, temperature=0.7, max_tokens=512)
-    flashcard_data = json.loads(response.strip())
+    # 4. Call Gemini AI
+    response = await llm.generate(
+        system_prompt="You are a language learning content creator. Always respond with valid JSON only.",
+        user_prompt=prompt,
+        temperature=0.7,
+        max_tokens=512
+    )
     
-    # 4. Validate with checker
+    # 5. Parse JSON response
+    cleaned = response.strip()
+    # Remove markdown code blocks if present
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    
+    flashcard_data = json.loads(cleaned.strip())
+    
+    # 6. Validate with checker AI
     checker_result = await checker.check_content(
         module="vocabulary",
+        original_instruction="Generate vocabulary flashcard",
+        user_input={"target_language": target_language, "level": level},
         generated_content=json.dumps(flashcard_data)
     )
     
-    # 5. Save to audit log
+    # 7. Save to database
     content_log = ContentLog(
         user_id=user.id,
         module="vocabulary",
@@ -363,12 +427,11 @@ Respond ONLY with valid JSON:
     db.add(content_log)
     db.commit()
     
+    # 8. Return flashcard
     return FlashcardResponse(**flashcard_data)
 ```
 
-### Step 4: Gemini AI Generates Content
-
-**Google Gemini API processes prompt (~1-2 seconds):**
+**Result Example:**
 ```json
 {
   "word": "Gato",
@@ -379,10 +442,39 @@ Respond ONLY with valid JSON:
 }
 ```
 
-### Step 5: Response Returned to Frontend
+### Step 6: Gemini AI Processes Request
+
+**What happens at Google Cloud:**
+
+```
+Backend sends HTTP POST to:
+https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent
+
+Payload:
+{
+  "contents": [{
+    "parts": [{"text": "Generate a vocabulary flashcard..."}]
+  }],
+  "generationConfig": {
+    "temperature": 0.7,
+    "maxOutputTokens": 512
+  }
+}
+
+Gemini AI:
+- Processes the prompt
+- Generates appropriate Spanish word for A1 level
+- Creates 4 multiple choice options
+- Returns JSON response
+```
+
+### Step 7: Response Travels Back to Web App
 
 **HTTP Response:**
-```json
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
 {
   "word": "Gato",
   "definition": "Cat",
@@ -392,49 +484,223 @@ Respond ONLY with valid JSON:
 }
 ```
 
-### Step 6: Frontend Displays Flashcard
+### Step 8: JavaScript Displays the Flashcard
 
-**Browser (app.js):**
+**File: `simple-web-interface/app.js`**
 ```javascript
 function displayFlashcard() {
+    // Build HTML for the word and example
     const flashcardHtml = `
         <div class="word">${currentFlashcard.word}</div>
         <div class="example">"${currentFlashcard.example_sentence}"</div>
         <div class="definition-label">What does this mean?</div>
     `;
     document.getElementById('flashcard').innerHTML = flashcardHtml;
-    
+
+    // Build HTML for the 4 options
     const optionsHtml = currentFlashcard.options.map((option, index) => `
         <div class="option" onclick="selectOption(${index})">
             ${option}
         </div>
     `).join('');
+    
     document.getElementById('options-container').innerHTML = optionsHtml;
+    document.getElementById('options-container').classList.remove('hidden');
 }
 ```
 
-### Step 7: User Submits Answer
+### Step 9: User Sees Flashcard on Screen
 
-**User clicks "Cat" (index 0):**
+```
+┌──────────────────────────────────┐
+│   📚 Vocabulary Practice         │
+├──────────────────────────────────┤
+│                                  │
+│            Gato                  │
+│   "El gato es muy bonito."       │
+│                                  │
+│   What does this mean?           │
+│                                  │
+│   ┌──────┐  ┌──────┐            │
+│   │ Cat  │  │ Dog  │            │
+│   └──────┘  └──────┘            │
+│   ┌──────┐  ┌──────┐            │
+│   │ Bird │  │ Fish │            │
+│   └──────┘  └──────┘            │
+│                                  │
+│   [Back to Modules]              │
+└──────────────────────────────────┘
+```
+
+### Step 10: User Clicks "Cat" (Correct Answer)
+
+**File: `simple-web-interface/app.js`**
 ```javascript
 async function selectOption(selectedIndex) {
+    const options = document.querySelectorAll('.option');
+    const correctIndex = currentFlashcard.correct_option_index;
+
+    // Disable all options
+    options.forEach(opt => opt.style.pointerEvents = 'none');
+
+    // Mark selected and correct answers
+    options[selectedIndex].classList.add('selected');
+    options[correctIndex].classList.add('correct');  // Turns green
+
+    if (selectedIndex !== correctIndex) {
+        options[selectedIndex].classList.add('incorrect');  // Would turn red
+    }
+
+    // Submit answer to backend
     const response = await fetch(`${API_BASE_URL}/vocabulary/answer`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
             user_id: currentUser.id,
             word: currentFlashcard.word,
             selected_option_index: selectedIndex,
-            correct_option_index: currentFlashcard.correct_option_index
+            correct_option_index: correctIndex
         })
     });
-    
+
     const result = await response.json();
-    showFeedback(result.is_correct, result.explanation);
+
+    // Show feedback
+    const feedbackDiv = document.getElementById('feedback');
+    const isCorrect = result.is_correct;
+    feedbackDiv.className = 'feedback ' + (isCorrect ? 'correct' : 'incorrect');
+    feedbackDiv.innerHTML = `
+        <div class="feedback-text">${isCorrect ? '✅ Correct!' : '❌ Incorrect'}</div>
+        <div class="feedback-explanation">${result.explanation}</div>
+        <button onclick="startVocabulary()" class="btn btn-primary" style="margin-top: 15px;">Next Word</button>
+    `;
+    feedbackDiv.classList.remove('hidden');
 }
 ```
 
-**HTTP Request:**
+### Step 11: Backend Updates Progress
+
+**File: `backend/app/services/vocabulary.py`**
+```python
+async def submit_vocabulary_answer(
+    request: VocabularyAnswerRequest,
+    db: Session
+) -> VocabularyAnswerResponse:
+    # 1. Find user
+    user = db.query(User).filter(User.external_id == request.user_id).first()
+    if not user:
+        raise ValueError("User not found")
+
+    # 2. Check if answer is correct
+    is_correct = request.selected_option_index == request.correct_option_index
+
+    # 3. Find or create progress record
+    progress = db.query(UserProgress).filter(
+        UserProgress.user_id == user.id,
+        UserProgress.module == "vocabulary"
+    ).first()
+
+    if not progress:
+        # Create new progress record
+        progress = UserProgress(
+            user_id=user.id,
+            module="vocabulary",
+            total_attempts=1,
+            correct_attempts=1 if is_correct else 0
+        )
+        db.add(progress)
+    else:
+        # Update existing progress
+        progress.total_attempts += 1
+        if is_correct:
+            progress.correct_attempts += 1
+
+    # 4. Calculate score percentage
+    if progress.total_attempts > 0:
+        progress.score = (progress.correct_attempts / progress.total_attempts) * 100
+
+    db.commit()
+
+    # 5. Return feedback
+    explanation = "Correct!" if is_correct else f"The correct answer was option {request.correct_option_index}."
+
+    return VocabularyAnswerResponse(
+        is_correct=is_correct,
+        correct_option_index=request.correct_option_index,
+        explanation=explanation
+    )
+```
+
+### Step 12: Web Shows Feedback
+
+```
+┌──────────────────────────────────┐
+│   📚 Vocabulary Practice         │
+├──────────────────────────────────┤
+│                                  │
+│            Gato                  │
+│   "El gato es muy bonito."       │
+│                                  │
+│   What does this mean?           │
+│                                  │
+│   ┌──────┐  ┌──────┐            │
+│   │ Cat ✓│  │ Dog  │            │
+│   └──────┘  └──────┘            │
+│   ┌──────┐  ┌──────┐            │
+│   │ Bird │  │ Fish │            │
+│   └──────┘  └──────┘            │
+│                                  │
+│  ┌────────────────────────────┐ │
+│  │  ✅ Correct!               │ │
+│  │  Great job!                │ │
+│  │  [Next Word]               │ │
+│  └────────────────────────────┘ │
+└──────────────────────────────────┘
+```
+
+### Database Storage After Interaction
+
+**`users` Table:**
+
+| id | external_id | target_language | level | created_at |
+|---|---|---|---|---|
+| abc-123-def-456... | maria | Spanish | A1 | 2026-01-21... |
+
+**`user_progress` Table:**
+
+| id | user_id | module | score | total_attempts | correct_attempts |
+|---|---|---|---|---|---|
+| xyz-789... | abc-123... | vocabulary | 100.0 | 1 | 1 |
+
+**`content_logs` Table:**
+
+| id | user_id | module | generated_content | is_validated |
+|---|---|---|---|---|
+| qwe-456... | abc-123... | vocabulary | {"word":"Gato","definition":"Cat",...} | true |
+
+---
+
+## Request/Response Examples
+
+### **Vocabulary Request**
+```http
+GET /api/v1/vocabulary/next?user_id=maria&target_language=Spanish&level=A1
+```
+
+### **Vocabulary Response**
+```json
+{
+  "word": "Gato",
+  "definition": "Cat",
+  "example_sentence": "El gato es muy bonito.",
+  "options": ["Cat", "Dog", "Bird", "Fish"],
+  "correct_option_index": 0
+}
+```
+
+### **Answer Submission**
 ```http
 POST /api/v1/vocabulary/answer
 Content-Type: application/json
@@ -447,62 +713,13 @@ Content-Type: application/json
 }
 ```
 
-### Step 8: Backend Updates Progress
-
-**Backend (app/services/vocabulary.py):**
-```python
-async def submit_vocabulary_answer(request: VocabularyAnswerRequest, db: Session):
-    # 1. Find user
-    user = db.query(User).filter(User.external_id == request.user_id).first()
-    
-    # 2. Check correctness
-    is_correct = request.selected_option_index == request.correct_option_index
-    
-    # 3. Update or create progress record
-    progress = db.query(UserProgress).filter(
-        UserProgress.user_id == user.id,
-        UserProgress.module == "vocabulary"
-    ).first()
-    
-    if progress:
-        progress.total_attempts += 1
-        if is_correct:
-            progress.correct_attempts += 1
-    else:
-        progress = UserProgress(
-            user_id=user.id,
-            module="vocabulary",
-            total_attempts=1,
-            correct_attempts=1 if is_correct else 0
-        )
-        db.add(progress)
-    
-    # 4. Calculate score
-    progress.score = (progress.correct_attempts / progress.total_attempts) * 100
-    db.commit()
-    
-    return VocabularyAnswerResponse(
-        is_correct=is_correct,
-        explanation="Correct!" if is_correct else "The correct answer was Cat."
-    )
-```
-
-### Step 9: Frontend Shows Feedback
-
-**HTTP Response:**
+### **Answer Response**
 ```json
 {
   "is_correct": true,
   "correct_option_index": 0,
-  "explanation": "Correct! 'Gato' means 'Cat' in Spanish."
+  "explanation": "Correct!"
 }
-```
-
-**Browser displays:**
-```
-✅ Correct!
-Great job! You've answered 1 out of 1 correctly (100%).
-[Next Word]
 ```
 
 ---
@@ -517,6 +734,7 @@ Great job! You've answered 1 out of 1 correctly (100%).
 - **Error handling** converts exceptions to HTTP responses
 
 ---
+
 
 ## Quick Reference
 

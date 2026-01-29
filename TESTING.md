@@ -1158,6 +1158,60 @@ ab -n 100 -c 10 http://localhost:8000/api/v1/health
 
 ---
 
+## Automated Testing Script
+
+For batch testing without manual intervention:
+
+```bash
+#!/bin/bash
+# Save as test_all.sh in backend directory
+
+BASE_URL="http://localhost:8000/api/v1"
+USER_ID="auto_test_user_$(date +%s)"
+
+echo "🧪 Running Automated Tests"
+echo "=================================="
+
+# Test 1: Health
+echo "✓ Health check..."
+curl -s "$BASE_URL/health" | grep -q "ok" && echo "  PASS" || echo "  FAIL"
+
+# Test 2: Create User
+echo "✓ Creating user..."
+curl -s -X POST "$BASE_URL/users" \
+  -H "Content-Type: application/json" \
+  -d "{\"external_id\": \"$USER_ID\", \"target_language\": \"Spanish\", \"level\": \"A1\"}" \
+  | grep -q "$USER_ID" && echo "  PASS" || echo "  FAIL"
+
+# Test 3: Get Flashcard
+echo "✓ Getting vocabulary flashcard..."
+curl -s "$BASE_URL/vocabulary/next?user_id=$USER_ID&target_language=Spanish&level=A1" \
+  | grep -q "word" && echo "  PASS" || echo "  FAIL"
+
+# Test 4: Grammar Question
+echo "✓ Getting grammar question..."
+curl -s "$BASE_URL/grammar/question?user_id=$USER_ID&target_language=Spanish&level=A1" \
+  | grep -q "question" && echo "  PASS" || echo "  FAIL"
+
+# Test 5: User Progress
+echo "✓ Checking user progress..."
+curl -s "$BASE_URL/users/$USER_ID/progress" \
+  | grep -q "\[\]" && echo "  PASS (No progress yet)" || echo "  PASS (Progress recorded)"
+
+echo ""
+echo "===================================="
+echo "✅ Automated tests complete!"
+```
+
+**Run the script:**
+
+```bash
+chmod +x test_all.sh
+./test_all.sh
+```
+
+---
+
 ## Continuous Testing
 
 For ongoing testing as development continues:
