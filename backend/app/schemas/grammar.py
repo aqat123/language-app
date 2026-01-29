@@ -2,6 +2,14 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 
+class ValidationMetadata(BaseModel):
+    """Metadata about content validation."""
+    is_validated: bool
+    confidence_score: Optional[float] = None
+    primary_check_passed: Optional[bool] = None
+    secondary_check_passed: Optional[bool] = None
+
+
 class GrammarQuestionResponse(BaseModel):
     """Response containing a grammar question."""
     question_id: str
@@ -9,6 +17,7 @@ class GrammarQuestionResponse(BaseModel):
     options: List[str]
     correct_option_index: int
     explanation: Optional[str] = None
+    validation: Optional[ValidationMetadata] = None
 
 
 class GrammarAnswerRequest(BaseModel):

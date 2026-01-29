@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from uuid import uuid4
 from app.db.models import User, ContentLog, UserProgress
-from app.services.ai_services import get_llm_client, get_checker_service
+from app.services.ai_services import get_llm_client, get_checker_service, get_secondary_validator
 from app.schemas.grammar import GrammarQuestionResponse, GrammarAnswerRequest, GrammarAnswerResponse
 
 
@@ -29,6 +29,7 @@ async def get_grammar_question(
     """
     llm = get_llm_client()
     checker = get_checker_service()
+    secondary_validator = get_secondary_validator()
 
     # Find or create user
     user = db.query(User).filter(User.external_id == user_id).first()
@@ -98,7 +99,7 @@ async def get_grammar_question(
         # Return a fallback or re-raise a clean error
         raise ValueError("Failed to generate valid grammar question from AI.")
 
-    # Check content
+    # Stage 1: Primary checker - format and basic validation
     checker_result = await checker.check_content(
         module="grammar",
         original_instruction="Generate grammar question",
@@ -113,18 +114,45 @@ async def get_grammar_question(
         except (TypeError, json.JSONDecodeError, KeyError):
             pass
 
+    # Stage 2: Secondary validation - deep accuracy and quality check
+    secondary_validation = await secondary_validator.deep_validate(
+        module="grammar",
+        user_input={"target_language": target_language, "level": level, "topic": topic},
+        generated_content=json.dumps(question_data),
+        primary_validation=checker_result
+    )
+
+    # If secondary validator suggests improvement and has high confidence, use it
+    if (not secondary_validation["is_approved"] and
+        secondary_validation["improved_version"] and
+        secondary_validation["confidence_score"] > 0.7):
+        try:
+            improved_data = json.loads(secondary_validation["improved_version"])
+            question_data = improved_data
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass  # Keep current version if parsing fails
+
     # Generate question ID
     question_id = str(uuid4())
     question_data["question_id"] = question_id
 
-    # Log content
+    # Add validation metadata for frontend display
+    question_data["validation"] = {
+        "is_validated": checker_result["is_valid"] and secondary_validation["is_approved"],
+        "confidence_score": secondary_validation.get("confidence_score"),
+        "primary_check_passed": checker_result["is_valid"],
+        "secondary_check_passed": secondary_validation["is_approved"]
+    }
+
+    # Log content with both validation stages
     content_log = ContentLog(
         user_id=user.id,
         module="grammar",
         input_payload={"target_language": target_language, "level": level, "topic": topic},
         generated_content=question_data,
         checker_result=checker_result,
-        is_validated=checker_result["is_valid"]
+        secondary_validation=secondary_validation,
+        is_validated=checker_result["is_valid"] and secondary_validation["is_approved"]
     )
     db.add(content_log)
     db.commit()

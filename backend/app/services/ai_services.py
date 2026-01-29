@@ -181,6 +181,128 @@ Respond ONLY with valid JSON in this exact format:
             }
 
 
+class SecondaryValidatorService:
+    """
+    Secondary AI validator for deeper content verification.
+    Performs comprehensive validation for accuracy, educational value, and appropriateness.
+    """
+
+    def __init__(self, llm_client: LLMClient):
+        self.llm = llm_client
+
+    async def deep_validate(
+        self,
+        *,
+        module: str,
+        user_input: Dict[str, Any],
+        generated_content: str,
+        primary_validation: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Perform deep validation of content after primary check.
+
+        Args:
+            module: The learning module
+            user_input: User input data
+            generated_content: The content to validate
+            primary_validation: Results from the primary checker
+
+        Returns:
+            Dict with comprehensive validation results
+        """
+        user_input_json = json.dumps(user_input, indent=2)
+        primary_issues = ", ".join(primary_validation.get("issues", [])) or "None"
+
+        validator_prompt = f"""You are an expert language learning content auditor performing a comprehensive review.
+
+MODULE: {module}
+USER_INPUT: {user_input_json}
+GENERATED_CONTENT: {generated_content}
+PRIMARY_CHECKER_ISSUES: {primary_issues}
+
+Perform a deep validation checking:
+1. **Accuracy**: Are all language examples, translations, and definitions factually correct?
+2. **Educational Value**: Is this content truly helpful for language learning at the specified level?
+3. **Cultural Sensitivity**: Is the content culturally appropriate and respectful?
+4. **Difficulty Match**: Does the difficulty match the user's specified level?
+5. **Pedagogical Quality**: Does this follow best practices in language teaching?
+6. **Safety**: Is there any inappropriate, offensive, or harmful content?
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "is_approved": true or false,
+  "confidence_score": 0.0 to 1.0,
+  "validation_details": {{
+    "accuracy": "pass/fail with brief note",
+    "educational_value": "pass/fail with brief note",
+    "cultural_sensitivity": "pass/fail with brief note",
+    "difficulty_match": "pass/fail with brief note",
+    "pedagogical_quality": "pass/fail with brief note",
+    "safety": "pass/fail with brief note"
+  }},
+  "critical_issues": ["issue 1", "issue 2"],
+  "recommendations": ["recommendation 1", "recommendation 2"],
+  "improved_version": "improved content or null"
+}}"""
+
+        try:
+            response = await self.llm.generate(
+                system_prompt="You are an expert language learning content auditor. Always respond with valid JSON only.",
+                user_prompt=validator_prompt,
+                temperature=0.05,  # Very low temperature for consistency
+                max_tokens=2048
+            )
+
+            # Clean up response
+            cleaned_response = response.strip()
+            if cleaned_response.startswith("```json"):
+                cleaned_response = cleaned_response[7:]
+            if cleaned_response.startswith("```"):
+                cleaned_response = cleaned_response[3:]
+            if cleaned_response.endswith("```"):
+                cleaned_response = cleaned_response[:-3]
+            cleaned_response = cleaned_response.strip()
+
+            result = json.loads(cleaned_response)
+
+            # Validate structure
+            if "is_approved" not in result:
+                result["is_approved"] = True
+            if "confidence_score" not in result:
+                result["confidence_score"] = 0.8
+            if "validation_details" not in result:
+                result["validation_details"] = {}
+            if "critical_issues" not in result:
+                result["critical_issues"] = []
+            if "recommendations" not in result:
+                result["recommendations"] = []
+            if "improved_version" not in result:
+                result["improved_version"] = None
+
+            return result
+
+        except json.JSONDecodeError:
+            # If validator fails, return permissive result
+            return {
+                "is_approved": True,
+                "confidence_score": 0.5,
+                "validation_details": {},
+                "critical_issues": ["Secondary validator returned invalid JSON"],
+                "recommendations": [],
+                "improved_version": None
+            }
+        except Exception as e:
+            # On any error, return permissive result
+            return {
+                "is_approved": True,
+                "confidence_score": 0.5,
+                "validation_details": {},
+                "critical_issues": [f"Secondary validator error: {str(e)}"],
+                "recommendations": [],
+                "improved_version": None
+            }
+
+
 # Global LLM client instance
 _llm_client: Optional[LLMClient] = None
 
@@ -200,3 +322,8 @@ def get_llm_client() -> LLMClient:
 def get_checker_service() -> CheckerService:
     """Get a checker service instance."""
     return CheckerService(get_llm_client())
+
+
+def get_secondary_validator() -> SecondaryValidatorService:
+    """Get a secondary validator service instance."""
+    return SecondaryValidatorService(get_llm_client())

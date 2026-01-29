@@ -59,5 +59,6 @@ class ContentLog(Base):
     input_payload = Column(JSON, nullable=False)
     generated_content = Column(JSON, nullable=False)
     checker_result = Column(JSON, nullable=True)
+    secondary_validation = Column(JSON, nullable=True)
     is_validated = Column(Boolean, default=False)
     created_at = Column(DateTime, server_default=func.now())

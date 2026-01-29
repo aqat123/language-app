@@ -384,16 +384,109 @@ header h1 {
     font-weight: 600;
 }
 
+/* Validation Badge */
+.validation-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 15px;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.validation-badge.verified {
+    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
+}
+
+.validation-badge.unverified {
+    background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+    color: white;
+    box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
+}
+
+.validation-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* Validation Details Panel */
+.validation-details {
+    background: #f8f9fa;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease-out;
+}
+
+.validation-details.expanded {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.validation-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.validation-detail-row:last-child {
+    border-bottom: none;
+}
+
+.validation-detail-label {
+    font-weight: 600;
+    color: #555;
+}
+
+.validation-detail-value {
+    color: #333;
+}
+
+.validation-detail-value.pass {
+    color: #4caf50;
+    font-weight: 600;
+}
+
+.validation-detail-value.fail {
+    color: #f44336;
+    font-weight: 600;
+}
+
+.confidence-meter {
+    width: 100%;
+    height: 8px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 5px;
+}
+
+.confidence-fill {
+    height: 100%;
+    background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+    transition: width 0.3s;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
     header h1 {
         font-size: 2rem;
     }
-    
+
     .module-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .options-container {
         grid-template-columns: 1fr;
     }

@@ -4,7 +4,15 @@ from sqlalchemy.orm import Session
 from uuid import uuid4
 from app.db.models import User, ContentLog, UserProgress
 from app.services.image_client import get_image_client
-from app.services.ai_services import get_llm_client, get_checker_service
+from app.core.config import settings
+
+# Conditionally import Vertex AI client
+if settings.USE_VERTEX_AI:
+    try:
+        from app.services.vertex_image_client import get_vertex_image_client
+    except ImportError:
+        print("Warning: Vertex AI not available. Install google-cloud-aiplatform.")
+from app.services.ai_services import get_llm_client, get_checker_service, get_secondary_validator
 from app.schemas.vocabulary import FlashcardResponse, VocabularyAnswerRequest, VocabularyAnswerResponse
 
 
@@ -28,7 +36,17 @@ async def get_next_flashcard(
     """
     llm = get_llm_client()
     checker = get_checker_service()
-    imm_client = get_image_client()
+    secondary_validator = get_secondary_validator()
+
+    # Use Vertex AI if enabled, otherwise use legacy client
+    if settings.USE_VERTEX_AI and settings.VERTEX_AI_PROJECT_ID:
+        imm_client = get_vertex_image_client(
+            credentials_path=settings.VERTEX_AI_CREDENTIALS_PATH,
+            project_id=settings.VERTEX_AI_PROJECT_ID,
+            location=settings.VERTEX_AI_LOCATION
+        )
+    else:
+        imm_client = get_image_client()
 
     # Find or create user
     user = db.query(User).filter(User.external_id == user_id).first()
@@ -97,7 +115,7 @@ async def get_next_flashcard(
 
     flashcard_data = json.loads(cleaned.strip())
 
-    # Check content
+    # Stage 1: Primary checker - format and basic validation
     checker_result = await checker.check_content(
         module="vocabulary",
         original_instruction="Generate vocabulary flashcard",
@@ -112,6 +130,24 @@ async def get_next_flashcard(
         except (json.JSONDecodeError, TypeError, KeyError):
             pass  # Keep original if parsing fails
 
+    # Stage 2: Secondary validation - deep accuracy and quality check
+    secondary_validation = await secondary_validator.deep_validate(
+        module="vocabulary",
+        user_input={"target_language": target_language, "level": level},
+        generated_content=json.dumps(flashcard_data),
+        primary_validation=checker_result
+    )
+
+    # If secondary validator suggests improvement and has high confidence, use it
+    if (not secondary_validation["is_approved"] and
+        secondary_validation["improved_version"] and
+        secondary_validation["confidence_score"] > 0.7):
+        try:
+            improved_data = json.loads(secondary_validation["improved_version"])
+            flashcard_data = improved_data
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass  # Keep current version if parsing fails
+
     word = flashcard_data.get("word", "")
     definition = flashcard_data.get("definition", "")
     imm_b64 = None
@@ -119,19 +155,31 @@ async def get_next_flashcard(
     if word and definition:
         # Generate image
         image_prompt = f"{word}, meaning: {definition}"
+        print(f"[DEBUG] Attempting to generate image for: {image_prompt}")
+        print(f"[DEBUG] Using Vertex AI: {settings.USE_VERTEX_AI}")
         imm_b64 = await imm_client.generate_safe_image(image_prompt)
+        print(f"[DEBUG] Image generated: {imm_b64 is not None}, size: {len(imm_b64) if imm_b64 else 0}")
 
     # update the field to be seen in the frontend
     flashcard_data["image_data"] = imm_b64
 
-    # Log content
+    # Add validation metadata for frontend display
+    flashcard_data["validation"] = {
+        "is_validated": checker_result["is_valid"] and secondary_validation["is_approved"],
+        "confidence_score": secondary_validation.get("confidence_score"),
+        "primary_check_passed": checker_result["is_valid"],
+        "secondary_check_passed": secondary_validation["is_approved"]
+    }
+
+    # Log content with both validation stages
     content_log = ContentLog(
         user_id=user.id,
         module="vocabulary",
         input_payload={"target_language": target_language, "level": level},
         generated_content=flashcard_data,
         checker_result=checker_result,
-        is_validated=checker_result["is_valid"]
+        secondary_validation=secondary_validation,
+        is_validated=checker_result["is_valid"] and secondary_validation["is_approved"]
     )
     db.add(content_log)
     db.commit()

@@ -1,5 +1,13 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+
+
+class ValidationMetadata(BaseModel):
+    """Metadata about content validation."""
+    is_validated: bool
+    confidence_score: Optional[float] = None
+    primary_check_passed: Optional[bool] = None
+    secondary_check_passed: Optional[bool] = None
 
 
 class FlashcardResponse(BaseModel):
@@ -10,6 +18,7 @@ class FlashcardResponse(BaseModel):
     options: Optional[List[str]] = None
     correct_option_index: Optional[int] = None
     image_data: Optional[str] = None
+    validation: Optional[ValidationMetadata] = None
 
 
 class VocabularyAnswerRequest(BaseModel):
