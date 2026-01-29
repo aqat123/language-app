@@ -1,22 +1,75 @@
+/**
+ * Language Learning App - Frontend Application Logic
+ * 
+ * Main JavaScript file for interactive language learning application.
+ * Handles user registration, learning module UI, API communication, and real-time feedback.
+ * 
+ * Features:
+ * - Vocabulary flashcards with image generation
+ * - Conversational AI tutor with message corrections
+ * - Grammar exercises with explanations
+ * - Writing analysis with corrections
+ * - Pronunciation evaluation with speech-to-text
+ * - Progress tracking across all modules
+ * 
+ * Module Structure:
+ * - Global State: User info and current lesson data
+ * - Utility Functions: UI helpers (showSection, showError)
+ * - User Registration: Account creation and login
+ * - Vocabulary Module: Flashcard display and answer evaluation
+ * - Conversation Module: Chat interface with AI tutor
+ * - Grammar Module: Multiple-choice grammar exercises
+ * - Writing Module: Text submission for correction
+ * - Phonetics Module: Audio recording and pronunciation scoring
+ * - Progress Tracking: Performance statistics display
+ * 
+ * All API calls use async/await pattern. Backend at: http://localhost:8000/api/v1
+ */
+
 // API Configuration
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 
 // Global State
+/**
+ * Current user information (updated on registration).
+ * @type {{id: string, language: string, level: string}}
+ */
 let currentUser = {
     id: '',
     language: '',
     level: ''
 };
+
+/** @type {object|null} Currently displayed flashcard data */
 let currentFlashcard = null;
+
+/** @type {string|null} Active conversation session ID */
 let currentConversationId = null;
+
+/** @type {object|null} Currently displayed grammar question */
 let currentGrammarQuestion = null;
+
+/** @type {string} Target phrase for phonetics practice */
 let currentTargetPhrase = "";
+
+/** @type {MediaRecorder|null} Audio recorder instance during phonetics recording */
 let mediaRecorder = null;
+
+/** @type {Blob[]} Array of audio data chunks during recording */
 let audioChunks = [];
+
+/** @type {Blob|null} Final audio blob after recording stops */
 let audioBlob = null;
+
+/** @type {Promise|null} Promise for pre-loaded next flashcard */
 let nextFlashcardPromise = null;
 
 // Utility Functions
+/**
+ * Display specified section and hide all others.
+ * Used for navigating between learning modules.
+ * @param {string} sectionId - HTML element ID of section to display (e.g., 'vocabulary-section')
+ */
 function showSection(sectionId) {
     document.querySelectorAll('.section').forEach(section => {
         section.classList.add('hidden');
@@ -24,11 +77,22 @@ function showSection(sectionId) {
     document.getElementById(sectionId).classList.remove('hidden');
 }
 
+/**
+ * Display error message to user via alert dialog.
+ * @param {string} message - Error message text to display
+ */
 function showError(message) {
     alert('Error: ' + message);
 }
 
 // User Registration
+/**
+ * Register a new user with language and level preferences.
+ * Validates input, sends registration to backend, updates global state, and navigates to module selection.
+ * Handles 400 response (duplicate user) as success to allow returning users.
+ * @async
+ * @throws {Error} if registration fails (other than 400 status)
+ */
 async function registerUser() {
     const userId = document.getElementById('user-id').value.trim();
     const language = document.getElementById('language').value;
@@ -84,11 +148,19 @@ async function registerUser() {
 }
 
 // Module Navigation
+/**
+ * Navigate back to module selection screen from any learning module.
+ */
 function backToModules() {
     showSection('module-section');
 }
 
 // Vocabulary Module
+/**
+ * Initialize vocabulary learning module.
+ * Fetches first flashcard, displays it, and pre-loads next card for smooth UX.
+ * @async
+ */
 async function startVocabulary() {
     showSection('vocabulary-section');
     document.getElementById('flashcard').innerHTML = '<div class="loading">Loading flashcard...</div>';
@@ -114,6 +186,9 @@ async function startVocabulary() {
     }
 }
 
+/**
+ * Render current flashcard with word, definition, example, image, and answer options.
+ */
 function displayFlashcard() {
     let imageHtml = '';
     if (currentFlashcard.image_data) {
@@ -146,6 +221,11 @@ function displayFlashcard() {
     document.getElementById('options-container').classList.remove('hidden');
 }
 
+/**
+ * Start fetching next flashcard in background for fast loading.
+ * Stores promise in global variable to check later.
+ * @async
+ */
 function preloadNextFlashcard() {
     // Start the fetch request immediately and store the word
     nextFlashcardPromise = fetch(
@@ -161,6 +241,11 @@ function preloadNextFlashcard() {
     });
 }
 
+/**
+ * Load and display next flashcard, using pre-loaded data if available.
+ * Falls back to fresh fetch if pre-load failed. Triggers next pre-load.
+ * @async
+ */
 async function loadNextWord() {
     // Reset UI state
     document.getElementById('options-container').classList.add('hidden');
@@ -197,6 +282,12 @@ async function loadNextWord() {
     }
 }
 
+/**
+ * Handle user selecting an answer option.
+ * Displays visual feedback immediately, then fetches detailed explanation from backend.
+ * @async
+ * @param {number} selectedIndex - Index of selected option (0-3)
+ */
 async function selectOption(selectedIndex) {
     const options = document.querySelectorAll('.option');
     const correctIndex = currentFlashcard.correct_option_index;
@@ -253,6 +344,11 @@ async function selectOption(selectedIndex) {
 }
 
 // Conversation Module
+/**
+ * Initialize conversation module with AI tutor.
+ * Sends user preferences to backend and displays opening message.
+ * @async
+ */
 async function startConversation() {
     showSection('conversation-section');
     document.getElementById('chat-container').innerHTML = '<div class="loading">Starting conversation...</div>';
@@ -284,12 +380,21 @@ async function startConversation() {
     }
 }
 
+/**
+ * Handle Enter key press in chat input field to send message.
+ * @param {KeyboardEvent} event - Keyboard event object
+ */
 function handleChatKeyPress(event) {
     if (event.key === 'Enter') {
         sendMessage();
     }
 }
 
+/**
+ * Send user message to AI tutor and display response with optional corrections and tips.
+ * Displays feedback in styled container with visual hierarchy.
+ * @async
+ */
 async function sendMessage() {
     const input = document.getElementById('chat-input');
     const message = input.value.trim();
@@ -352,6 +457,11 @@ async function sendMessage() {
 }
 
 // Grammar Module
+/**
+ * Initialize grammar learning module.
+ * Fetches a grammar question appropriate for user's level.
+ * @async
+ */
 async function startGrammar() {
     showSection('grammar-section');
     document.getElementById('grammar-question').innerHTML = '<div class="loading">Loading question...</div>';
@@ -373,6 +483,9 @@ async function startGrammar() {
     }
 }
 
+/**
+ * Render grammar question with multiple-choice options.
+ */
 function displayGrammarQuestion() {
     document.getElementById('grammar-question').innerHTML = `
         <div style="font-size: 1.5rem; margin-bottom: 20px;">${currentGrammarQuestion.question_text}</div>
@@ -388,6 +501,12 @@ function displayGrammarQuestion() {
     document.getElementById('grammar-options').classList.remove('hidden');
 }
 
+/**
+ * Handle user selecting a grammar answer option.
+ * Displays visual feedback with explanation and loads next question.
+ * @async
+ * @param {number} selectedIndex - Index of selected option (0-3)
+ */
 async function selectGrammarOption(selectedIndex) {
     const options = document.querySelectorAll('#grammar-options .option');
     const correctIndex = currentGrammarQuestion.correct_option_index;
@@ -413,6 +532,10 @@ async function selectGrammarOption(selectedIndex) {
 }
 
 // Writing Module
+/**
+ * Initialize writing practice module.
+ * Displays textarea for user to write text in target language.
+ */
 function startWriting() {
     showSection('writing-section');
     document.getElementById('writing-language').textContent = currentUser.language;
@@ -420,6 +543,11 @@ function startWriting() {
     document.getElementById('writing-feedback').classList.add('hidden');
 }
 
+/**
+ * Submit user's written text for AI analysis and feedback.
+ * Displays corrected text, overall comments, explanations, and score.
+ * @async
+ */
 async function submitWriting() {
     const text = document.getElementById('writing-text').value.trim();
 
@@ -467,6 +595,11 @@ async function submitWriting() {
 }
 
 // Progress
+/**
+ * Fetch and display user's learning progress across all modules.
+ * Shows completion percentage and correct/total attempt counts per module.
+ * @async
+ */
 async function showProgress() {
     showSection('progress-section');
     document.getElementById('progress-container').innerHTML = '<div class="loading">Loading progress...</div>';
@@ -506,6 +639,11 @@ async function showProgress() {
 }
 
 // Phonetics Module
+/**
+ * Initialize pronunciation practice module.
+ * Generates target phrase and resets audio recording UI.
+ * @async
+ */
 async function startPhonetics() {
     showSection('phonetics-section');
 
@@ -541,6 +679,13 @@ async function startPhonetics() {
 }
 
 // Recording Audio
+/**
+ * Toggle audio recording on/off.
+ * Start: requests microphone, begins recording, changes button to stop state.
+ * Stop: ends recording, saves audio blob, enables validation button.
+ * @async
+ * @throws Error if microphone access is denied
+ */
 async function toggleRecording() {
     const recordBtn = document.getElementById('record-btn');
     const statusText = document.getElementById('record-status');
@@ -589,6 +734,12 @@ async function toggleRecording() {
 }
 
 // Validate Pronunciation
+/**
+ * Submit recorded audio to backend for pronunciation evaluation.
+ * Analyzes speech-to-text and provides detailed feedback.
+ * Disables button and shows "Analyzing..." during request.
+ * @async
+ */
 async function validatePronunciation() {
     if (!audioBlob) {
         showError("Please record something first!");
@@ -627,6 +778,11 @@ async function validatePronunciation() {
 }
 
 // Display the feedback
+/**
+ * Render pronunciation evaluation results with score, transcript, and per-word feedback.
+ * Uses color coding and structured layout to highlight specific pronunciation issues.
+ * @param {object} result - Backend response containing score, transcript, feedback, and word_level_feedback
+ */
 function displayPhoneticsFeedback(result) {
     const feedbackContainer = document.getElementById('phonetics-feedback');
     const mainFeedback = document.getElementById('phonetics-main-feedback');
